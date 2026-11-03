@@ -1,0 +1,17 @@
+{
+  "name": "local-match-manager",
+  "version": "1.0.0",
+  "description": "Open `index.html` in Microsoft Edge or Chrome. No install, account, server, or internet connection is required. Keep all files in this folder together.",
+  "main": "app.js",
+  "scripts": {
+    "test": "node --test core.test.js history.test.js practice.test.js rubric.test.js shared.test.js timer-audio.test.js finals.test.js game.test.js",
+    "test:browser": "playwright test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@google/clasp": "3.4.1",
+    "@playwright/test": "^1.64.1"
+  }
+}

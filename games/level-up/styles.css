@@ -1,0 +1,8 @@
+/* Level Up goal diagrams. Generic scoring layout lives in styles.css. */
+.goal-diagram{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;height:167px;padding-top:5px;isolation:isolate}
+.tower-tier{display:flex;align-items:center;justify-content:center;height:37px;flex-shrink:0;border:1px solid var(--goal-color);border-bottom:7px solid var(--goal-color);background:var(--goal-wash);color:var(--goal-color);font-size:10px;transform:skewY(-12deg)}
+.tower-l3{width:40px;z-index:3}.tower-l2{width:65px;z-index:2;margin-top:-3px}.tower-l1{width:90px;z-index:1;margin-top:-3px}
+.tower-floor{align-self:flex-start;border-bottom:4px solid var(--goal-color);margin:8px 0 0 3px;padding:0 4px 3px;color:var(--goal-color);font-size:9px;transform:skewY(-12deg)}
+.top-goal-diagram{display:flex;align-items:center;justify-content:center;justify-self:center;width:42px;height:42px;border:6px solid #6f6b5b;background:var(--goal-color);transform:rotate(45deg);margin:8px 0}
+.top-goal-diagram span{transform:rotate(-45deg);font-size:11px;color:#33290d;font-weight:700}
+@media(max-width:420px){.tower-l3{width:30px}.tower-l2{width:48px}.tower-l1{width:68px}}

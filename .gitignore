@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Test reports and coverage
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+coverage/
+.nyc_output/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local environment and Google Apps Script settings
+.env
+.env.*
+!.env.example
+.clasp.json
+.clasprc.json
+
+# Operating system and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
