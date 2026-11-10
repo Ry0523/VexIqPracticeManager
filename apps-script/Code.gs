@@ -29,7 +29,7 @@ function eventSheet_() {
 // gets a read-only results view.
 // Google only reveals visitor emails from the owner's own Workspace domain, so the owner must belong to it.
 const ACCESS_SHEET = "Access";
-const ACCESS_HEADERS = ["Email", "Role", "Team", "Updated by", "Updated at (UTC)"];
+const ACCESS_HEADERS = ["Email", "Role", "Team", "Updated by", "Updated at (UTC)", "Name"];
 const ROLES = ["coach", "member"];
 
 function editorDomain_() {
@@ -37,13 +37,14 @@ function editorDomain_() {
 }
 
 function normalizeAccess_(entry, domain) {
+  const name = String(entry && entry.name || "").trim();
   const email = String(entry && entry.email || "").trim().toLowerCase();
   const role = String(entry && entry.role || "").trim().toLowerCase();
   const team = String(entry && entry.team || "").trim().toUpperCase();
-  if (!domain || email.length > 254 || !/^[a-z0-9._%+'-]+@[a-z0-9.-]+$/.test(email) || !email.endsWith(`@${domain}`)) return null;
+  if (name.length > 80 || !domain || email.length > 254 || !/^[a-z0-9._%+'-]+@[a-z0-9.-]+$/.test(email) || !email.endsWith(`@${domain}`)) return null;
   if (!ROLES.includes(role)) return null;
   if (role === "member" && !/^[A-Z0-9-]{1,20}$/.test(team)) return null;
-  return { email, role, team: role === "member" ? team : "" };
+  return { name, email, role, team: role === "member" ? team : "" };
 }
 
 // Rows edited by hand in the Access sheet that are incomplete or invalid are ignored rather than blocking everyone.
@@ -51,8 +52,8 @@ function accessList_(domain) {
   const sheet = spreadsheet_().getSheetByName(ACCESS_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const seen = new Set();
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
-    .map(([email, role, team]) => normalizeAccess_({ email, role, team }, domain))
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues()
+    .map(([email, role, team, , , name]) => normalizeAccess_({ name, email, role, team }, domain))
     .filter(entry => entry && !seen.has(entry.email) && seen.add(entry.email));
 }
 
@@ -75,7 +76,7 @@ function access_() {
 }
 
 function publicAccess_(access) {
-  return { canEdit: access.canEdit, role: access.role, team: access.team, email: access.email, domain: access.domain };
+  return { canEdit: access.canEdit, role: access.role, team: access.team, email: access.email, domain: access.domain, isOwner: access.role === "coach" && access.email === access.owner };
 }
 
 const blankFeedback_ = entry => ({ ...entry, ...(entry.authorEmail !== undefined ? { authorEmail: "" } : {}), reviewer: "", overallNotes: "", notes: Object.fromEntries(Object.keys(entry.notes).map(id => [id, ""])) });
@@ -243,6 +244,15 @@ function loadEventJson() {
   return JSON.stringify(loadEvent());
 }
 
+function previewMemberJson(team) {
+  const loaded = loadEvent();
+  if (!loaded.access.isOwner) throw new Error("App owner access required to preview the student view.");
+  const teamId = String(team || "").trim().toUpperCase();
+  if (!loaded.event || !loaded.event.teams.some(entry => entry.id === teamId)) throw new Error("Choose a team on the active roster to preview.");
+  const access = { ...loaded.access, canEdit: true, role: "member", team: teamId, email: `student-preview@${loaded.access.domain}` };
+  return JSON.stringify({ ...loaded, event: memberCopy_(loaded.event, teamId, access.email), access, previewing: true });
+}
+
 // Cheap freshness check polled by open pages. A1 holds only the revision pointer and is replaced in one write,
 // so it can be read without the lock or the full event.
 function eventRevisionJson() {
@@ -378,7 +388,7 @@ function saveAccessJson(requestJson) {
     const book = spreadsheet_();
     const sheet = book.getSheetByName(ACCESS_SHEET) || book.insertSheet(ACCESS_SHEET);
     const now = new Date().toISOString();
-    const rows = [ACCESS_HEADERS, ...entries.map(entry => [entry.email, entry.role, entry.team, access.email, now])];
+    const rows = [ACCESS_HEADERS, ...entries.map(entry => [entry.email, entry.role, entry.team, access.email, now, entry.name])];
     if (sheet.getLastRow() > 0) sheet.getRange(1, 1, sheet.getLastRow(), ACCESS_HEADERS.length).clearContent();
     sheet.getRange(1, 1, rows.length, ACCESS_HEADERS.length).setValues(rows);
     SpreadsheetApp.flush();

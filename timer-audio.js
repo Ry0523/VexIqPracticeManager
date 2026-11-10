@@ -11,7 +11,7 @@
   let clock = null;
   // Countdown beats, in milliseconds before the run starts, matching the recorded official timer: the beats are
   // 0.75 s apart and the start sound plays the instant the clock begins at 1:00.
-  const COUNTDOWN = Object.freeze([["countdown-3", 2140], ["countdown-2", 1390], ["countdown-1", 640]]);
+  const COUNTDOWN = Object.freeze([["countdown-3", 2384], ["countdown-2", 1634], ["countdown-1", 884]]);
   const COUNTDOWN_MS = COUNTDOWN[0][1];
   const LEAD_IN = "countdown-start";
   // The number to show while counting down (3, 2, or 1), given the time left before the run starts.
@@ -50,13 +50,13 @@
       clips.set(name, { samples: samples.subarray(first), rate });
     }
     // The clips were cut from one recording, so their edges fall mid-waveform; a 2 ms ramp keeps them from clicking.
-    const toBuffer = ({ samples, rate }) => {
+    const toBuffer = ({ samples, rate }, fadeStart = true) => {
       const buffer = next.createBuffer(1, samples.length, rate);
       const channel = buffer.getChannelData(0);
       channel.set(samples);
       const ramp = Math.min(Math.round(rate * 0.002), Math.floor(samples.length / 2));
       for (let index = 0; index < ramp; index++) {
-        channel[index] *= index / ramp;
+        if (fadeStart) channel[index] *= index / ramp;
         channel[samples.length - 1 - index] *= index / ramp;
       }
       return buffer;
@@ -70,6 +70,7 @@
       joined.set(begin.samples, last.samples.length);
       decoded.set(LEAD_IN, toBuffer({ samples: joined, rate: last.rate }));
     }
+    decoded.set("start-from-beginning", toBuffer(clips.get("start"), false));
     buffers = decoded;
     gain = context.createGain();
     gain.connect(context.destination);
@@ -98,11 +99,14 @@
     clock = null;
   }
 
-  function schedule(name, time, duration = Infinity) {
+  function schedule(name, time, duration = Infinity, offset = 0) {
     const source = context.createBufferSource();
     source.buffer = buffers.get(name);
     source.connect(gain);
-    source.start(time, 0, Math.min(source.buffer.duration, duration));
+    const availableDuration = source.buffer.duration - offset;
+    const playbackDuration = Math.min(availableDuration, duration);
+    if (playbackDuration < availableDuration) source.start(time, offset, playbackDuration);
+    else source.start(time, offset);
     sources.push(source);
   }
 
@@ -110,7 +114,8 @@
     stop();
     const token = generation;
     starting = true;
-    const duration = remaining + (fresh ? COUNTDOWN_MS : 0);
+    const countdown = fresh && root.document.getElementById("timer-countdown").checked;
+    const duration = remaining + (countdown ? COUNTDOWN_MS : 0);
     try {
       prepare();
       let timeout;
@@ -134,13 +139,14 @@
       const { openMs: switchOpen, closeMs: switchClose } = root.MatchCore.TIMING.driverSwitch;
       const switching = driver;
       const nextCue = switching && remaining > switchOpen ? remaining - switchOpen : switching && remaining > switchClose ? remaining - switchClose : remaining;
-      const startAt = origin + (fresh ? COUNTDOWN_MS / 1000 : 0);
-      const joined = fresh && buffers.has(LEAD_IN);
-      if (fresh) for (const [name, at] of joined ? COUNTDOWN.slice(0, -1) : COUNTDOWN) schedule(name, origin + (COUNTDOWN_MS - at) / 1000);
+      const startAt = origin + (countdown ? COUNTDOWN_MS / 1000 : 0);
+      const joined = countdown && buffers.has(LEAD_IN);
+      const startCue = joined ? LEAD_IN : fresh && !countdown ? "start-from-beginning" : "start";
+      if (countdown) for (const [name, at] of joined ? COUNTDOWN.slice(0, -1) : COUNTDOWN) schedule(name, origin + (COUNTDOWN_MS - at) / 1000);
       if (joined) {
         const lead = COUNTDOWN.at(-1)[1] / 1000;
         schedule(LEAD_IN, startAt - lead, lead + nextCue / 1000);
-      } else schedule("start", startAt, nextCue / 1000);
+      } else schedule(startCue, startAt, nextCue / 1000);
       if (switching) {
         if (remaining > switchOpen) schedule("switch-open", (end - switchOpen) / 1000);
         if (remaining > switchClose) schedule("switch-close", (end - switchClose) / 1000);

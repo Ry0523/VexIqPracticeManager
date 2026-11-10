@@ -22,11 +22,11 @@
     if (ids.includes(previous)) select.value = previous;
     const member = get("access-role").value === "member";
     select.disabled = busy || !member || !ids.length;
-    for (const id of ["access-email", "access-role", "save-access"]) get(id).disabled = busy || entries === null;
-    const sorted = [...(entries || [])].sort((a, b) => (a.role === b.role ? 0 : a.role === "coach" ? -1 : 1) || a.team.localeCompare(b.team, "en", { numeric: true }) || a.email.localeCompare(b.email));
-    const ownerRow = info.owner ? `<tr><td>${escapeText(info.owner)}</td><td>Coach (app owner)</td><td>All teams</td><td></td></tr>` : "";
-    get("access-rows").innerHTML = ownerRow + sorted.map(entry => `<tr><td>${escapeText(entry.email)}</td><td>${ROLE_NAMES[entry.role]}</td><td>${entry.role === "member" ? `${escapeText(entry.team)}${roster.has(entry.team) ? "" : " (not on roster)"}` : "All teams"}</td><td><button type="button" data-access-remove="${escapeText(entry.email)}" aria-label="Remove ${escapeText(entry.email)}"${busy ? " disabled" : ""}>Remove</button></td></tr>`).join("")
-      || (entries === null ? "" : '<tr><td colspan="4">No coaches or team members added yet.</td></tr>');
+    for (const id of ["access-name", "access-email", "access-role", "save-access"]) get(id).disabled = busy || entries === null;
+    const sorted = [...(entries || [])].sort((a, b) => (a.role === b.role ? 0 : a.role === "coach" ? -1 : 1) || a.team.localeCompare(b.team, "en", { numeric: true }) || (a.name || a.email).localeCompare(b.name || b.email) || a.email.localeCompare(b.email));
+    const ownerRow = info.owner ? `<tr><td>App owner</td><td>${escapeText(info.owner)}</td><td>Coach (app owner)</td><td>All teams</td><td></td></tr>` : "";
+    get("access-rows").innerHTML = ownerRow + sorted.map(entry => `<tr><td>${escapeText(entry.name || entry.email)}</td><td>${escapeText(entry.email)}</td><td>${ROLE_NAMES[entry.role]}</td><td>${entry.role === "member" ? `${escapeText(entry.team)}${roster.has(entry.team) ? "" : " (not on roster)"}` : "All teams"}</td><td><button type="button" data-access-remove="${escapeText(entry.email)}" aria-label="Remove ${escapeText(entry.email)}"${busy ? " disabled" : ""}>Remove</button></td></tr>`).join("")
+      || (entries === null ? "" : '<tr><td colspan="5">No coaches or team members added yet.</td></tr>');
   }
 
   async function open() {
@@ -65,14 +65,15 @@
   get("access-form").addEventListener("submit", async event => {
     event.preventDefault();
     if (busy || entries === null) return;
+    const name = get("access-name").value.trim();
     const email = get("access-email").value.trim().toLowerCase();
     const role = get("access-role").value;
     const team = role === "member" ? get("access-team").value : "";
     if (info.domain && !email.endsWith(`@${info.domain}`)) { notify(`Only @${info.domain} accounts can be added. Google does not share other accounts' emails with the app.`); return; }
     if (role === "member" && !team) { notify("Add the team in Teams & schedule before adding its members."); return; }
     const existing = entries.some(entry => entry.email === email);
-    const next = [...entries.filter(entry => entry.email !== email), { email, role, team }];
-    if (await store(next, `${email} ${existing ? "updated" : "added"} as ${role === "coach" ? "a coach" : `a team ${team} member`}.`)) get("access-email").value = "";
+    const next = [...entries.filter(entry => entry.email !== email), { name, email, role, team }];
+    if (await store(next, `${email} ${existing ? "updated" : "added"} as ${role === "coach" ? "a coach" : `a team ${team} member`}.`)) { get("access-name").value = ""; get("access-email").value = ""; }
   });
   get("access-rows").addEventListener("click", async event => {
     const button = event.target.closest("[data-access-remove]");

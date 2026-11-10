@@ -7,7 +7,37 @@
   let timeLeft = MATCH_MS;
   let ended = false;
   let started = false;
+  let paused = false;
+  let flowWatch = null;
   const calculator = get("skills-scoring-inputs");
+  const form = get("skills-form");
+  const timerStage = get("skills-timer-stage");
+  const eligibility = get("skills-eligibility");
+  const attemptLog = get("skills-attempt-log");
+  timerStage.querySelector(".timer-actions")?.remove();
+  const runLayout = document.createElement("div");
+  runLayout.className = "skills-run-layout";
+  const runPanel = document.createElement("div");
+  runPanel.className = "skills-run-panel";
+  const scorePanel = document.createElement("div");
+  scorePanel.className = "skills-score-panel";
+  const attemptHeader = get("skills-attempt-header");
+  const resultFields = form.querySelector(".skills-result-fields");
+  resultFields.id = "skills-result-fields";
+  const scoreHeading = form.querySelector(".section-heading");
+  const scoreTotal = form.querySelector(".score-total");
+  const scoreActions = form.querySelector(".score-actions");
+  runPanel.append(attemptLog, eligibility, attemptHeader, resultFields, timerStage);
+  scorePanel.append(scoreHeading, scoreTotal, calculator, scoreActions);
+  runLayout.append(runPanel, scorePanel);
+  form.replaceChildren(runLayout);
+  const fullscreenButton = document.createElement("button");
+  fullscreenButton.id = "skills-fullscreen";
+  fullscreenButton.type = "button";
+  fullscreenButton.title = "Full-screen skills run";
+  fullscreenButton.setAttribute("aria-label", "Full-screen skills run");
+  fullscreenButton.textContent = "\u26F6";
+  timerStage.append(fullscreenButton);
   const modeName = mode => mode === "driver" ? "Driver" : "Autonomous";
   const record = () => state.skills.find(entry => entry.team === selection.team && entry.mode === selection.mode && entry.attempt === selection.attempt);
   const scheduled = team => state.skillsOnly || state.matches.some(match => match.teams.includes(team));
@@ -17,7 +47,7 @@
 
   async function canSwitch() {
     if (!idle()) return false;
-    return !changed || (await ask("Discard this unposted skills score?", "Discard score", true));
+    return !(changed || paused) || (await ask("Discard this unposted skills score?", "Discard score", true));
   }
 
   function loadSlot() {
@@ -29,6 +59,7 @@
     timeLeft = MATCH_MS;
     ended = false;
     started = false;
+    paused = false;
     get("skills-opt-in").checked = saved?.optIn || false;
     get("skills-stop-time").value = saved?.stopTime || 0;
     get("skills-status").value = saved?.status || "ok";
@@ -45,12 +76,12 @@
     if (!optIn || status !== "ok") get("skills-stop-time").value = 0;
     const stop = Number(get("skills-stop-time").value);
     const validStop = get("skills-stop-time").value !== "" && Number.isInteger(stop) && stop >= 0 && stop <= MATCH_MS / 1000;
-    get("skills-stop-time").disabled = !optIn || status !== "ok" || endAt !== null;
+    get("skills-stop-time").disabled = !optIn || status !== "ok" || endAt !== null || (started && !ended);
     get("skills-opt-in").disabled = started;
     if (valid && status !== "ok") get("skills-score-total").textContent = "0";
     // Team members can post an unused attempt but cannot update or void a posted one.
     const memberLocked = isMember() && Boolean(record());
-    get("save-skills").disabled = !valid || !validStop || !scheduled(selection.team) || memberLocked || endAt !== null || deadline !== null || globalThis.TimerAudio.isStarting();
+    get("save-skills").disabled = !valid || !validStop || !scheduled(selection.team) || memberLocked || endAt !== null || (started && !ended) || deadline !== null || globalThis.TimerAudio.isStarting();
     get("save-skills").hidden = memberLocked;
     calculator.inert = memberLocked;
     get("skills-status").disabled = memberLocked;
@@ -60,18 +91,63 @@
   }
 
   const canResetClock = () => endAt === null && (ended || timeLeft !== MATCH_MS) && !globalThis.TimerAudio.isStarting();
+  const flowOpen = () => get("skills-view").classList.contains("skills-flow-mode");
+
+  async function enterFlow() {
+    if (flowOpen() || !selection.team) return;
+    get("skills-view").classList.add("skills-flow-mode");
+    document.body.classList.add("flow-open");
+    syncScreenWakeLock();
+      get("skills-flow-label").textContent = `${selection.team} / ${teamName(selection.team)} / ${modeName(selection.mode)} / Attempt ${selection.attempt} of 3`;
+    try { if (document.documentElement.requestFullscreen && !document.fullscreenElement) await document.documentElement.requestFullscreen(); }
+    catch { /* The full-screen layout remains available if the browser blocks fullscreen. */ }
+    clearInterval(flowWatch);
+    if (document.fullscreenElement) flowWatch = setInterval(() => { if (!document.fullscreenElement) exitFlow(); }, 500);
+  }
+
+  function exitFlow() {
+    if (!flowOpen()) return;
+    get("skills-view").classList.remove("skills-flow-mode");
+    document.body.classList.remove("flow-open");
+    syncScreenWakeLock();
+    clearInterval(flowWatch);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+
+  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) exitFlow(); });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && flowOpen() && !document.fullscreenElement && !document.querySelector("dialog[open]")) exitFlow();
+  });
 
   function updateClock() {
+    syncScreenWakeLock();
     const seconds = Math.ceil(Math.min(MATCH_MS, timeLeft) / 1000);
     const driving = selection.mode === "driver";
+    const preparing = globalThis.TimerAudio.isStarting() || (endAt !== null && timeLeft > MATCH_MS);
+    const controlState = ended ? "ended" : preparing ? "preparing" : endAt !== null ? "running" : paused ? "paused" : "ready";
+    get("skills-flow-label").textContent = selection.team ? `${selection.team} / ${teamName(selection.team)} · ${modeName(selection.mode)} / Attempt ${selection.attempt} of 3` : "Skills run";
     get("skills-timer").textContent = clockText(timeLeft);
-    get("skills-timer-label").textContent = ended ? "SKILLS RUN ENDED" : endAt !== null ? driving && inSwitchWindow(seconds * 1000) ? "DRIVER SWITCH WINDOW" : "SKILLS RUN IN PROGRESS" : "READY FOR SKILLS";
-    if (timeLeft > MATCH_MS) get("skills-timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(timeLeft - MATCH_MS)}`;
+    get("skills-timer-dial").style.setProperty("--timer-progress-angle", timerProgressAngle(timeLeft));
+    get("skills-timer-label").textContent = ended ? "SKILLS RUN ENDED" : preparing ? "PREPARING TIMER" : paused ? "SKILLS RUN PAUSED" : endAt !== null ? driving && inSwitchWindow(seconds * 1000) ? "DRIVER SWITCH WINDOW" : "SKILLS RUN IN PROGRESS" : "READY FOR SKILLS";
+    if (timeLeft > MATCH_MS && get("timer-countdown").checked) get("skills-timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(timeLeft - MATCH_MS)}`;
     get("skills-timer-stage").classList.toggle("ended", ended);
-    get("start-skills").textContent = endAt !== null ? "End run" : "Start run";
-    if (globalThis.TimerAudio.isStarting()) get("skills-timer-label").textContent = "PREPARING TIMER";
-    get("start-skills").disabled = ended || !selection.team || !scheduled(selection.team) || Boolean(record()) || globalThis.TimerAudio.isStarting();
+    const controls = get("skills-run-controls");
+    controls.dataset.state = controlState;
+    const reset = get("reset-skills-timer");
+    reset.hidden = !["paused", "ended"].includes(controlState);
+    reset.setAttribute("aria-label", controlState === "paused" ? "Reset paused run" : "Reset timer");
+    reset.title = controlState === "paused" ? "Reset paused run" : "Reset timer";
+    reset.querySelector(".run-cancel-icon").toggleAttribute("hidden", controlState !== "paused");
+    reset.querySelector(".run-reset-icon").toggleAttribute("hidden", controlState !== "ended");
+    get("start-skills").hidden = !["ready", "paused"].includes(controlState);
+    get("start-skills").setAttribute("aria-label", controlState === "paused" ? "Resume run" : "Start run");
+    get("start-skills").title = controlState === "paused" ? "Resume run" : "Start run";
+    get("start-skills").disabled = !["ready", "paused"].includes(controlState) || !selection.team || !scheduled(selection.team) || Boolean(record()) || globalThis.TimerAudio.isStarting();
+    get("pause-skills").hidden = controlState !== "running";
+    get("stop-skills").hidden = !["running", "preparing"].includes(controlState);
+    get("stop-skills").disabled = globalThis.TimerAudio.isStarting();
     get("reset-skills-timer").disabled = !canResetClock();
+    get("skills-fullscreen").disabled = !selection.team;
     updateScoreEntry();
   }
 
@@ -204,32 +280,59 @@
     }
     notify("All three driver and three autonomous attempts have been recorded for this team.");
   });
+  get("skills-fullscreen").addEventListener("click", enterFlow);
+  get("skills-flow-exit").addEventListener("click", exitFlow);
   get("start-skills").addEventListener("click", async () => {
     if (globalThis.TimerAudio.isStarting()) { notify("Wait for the timer audio to become ready."); return; }
-    if (endAt !== null) {
-      if (endAt - globalThis.TimerAudio.now() > MATCH_MS) {
-        globalThis.TimerAudio.stop();
-        endAt = null; timeLeft = MATCH_MS; started = false; ended = false;
-        updateClock(); return;
-      }
-      timeLeft = Math.max(0, endAt - globalThis.TimerAudio.now());
-      endAt = null; ended = true;
-      get("skills-stop-time").value = get("skills-opt-in").checked ? Math.ceil(timeLeft / 1000) : 0;
+    if (endAt !== null || !idle() || ended || record() || !scheduled(selection.team)) return;
+    const fresh = !started;
+    started = true;
+    paused = false;
+    const ready = globalThis.TimerAudio.start(timeLeft, fresh, selection.mode === "driver");
+    updateClock();
+    endAt = await ready;
+    if (endAt !== null) timeLeft = Math.max(0, endAt - globalThis.TimerAudio.now());
+    updateClock();
+  });
+  get("pause-skills").addEventListener("click", () => {
+    if (endAt === null || globalThis.TimerAudio.isStarting() || timeLeft > MATCH_MS) return;
+    timeLeft = Math.max(0, endAt - globalThis.TimerAudio.now());
+    endAt = null;
+    if (timeLeft === 0) {
+      ended = true;
+      get("skills-stop-time").value = 0;
       changed = true;
       globalThis.TimerAudio.finish();
     } else {
-      if (!idle() || ended || record() || !scheduled(selection.team)) return;
-      started = true;
-      const ready = globalThis.TimerAudio.start(timeLeft, true, selection.mode === "driver");
-      updateClock();
-      endAt = await ready;
-      if (endAt !== null) timeLeft = Math.max(0, endAt - globalThis.TimerAudio.now());
+      paused = true;
+      globalThis.TimerAudio.stop();
     }
+    updateClock();
+  });
+  get("stop-skills").addEventListener("click", () => {
+    if (globalThis.TimerAudio.isStarting()) {
+      globalThis.TimerAudio.stop();
+      endAt = null; timeLeft = MATCH_MS; started = false; paused = false; ended = false;
+      updateClock(); return;
+    }
+    if (endAt === null) return;
+    const remaining = Math.max(0, endAt - globalThis.TimerAudio.now());
+    if (remaining > MATCH_MS) {
+      globalThis.TimerAudio.stop();
+      endAt = null; timeLeft = MATCH_MS; started = false; paused = false; ended = false;
+      get("skills-stop-time").value = 0;
+      updateClock(); return;
+    }
+    timeLeft = remaining;
+    endAt = null; ended = true; paused = false;
+    get("skills-stop-time").value = get("skills-opt-in").checked ? Math.ceil(timeLeft / 1000) : 0;
+    changed = true;
+    globalThis.TimerAudio.finish();
     updateClock();
   });
   get("reset-skills-timer").addEventListener("click", () => {
     if (!canResetClock()) return;
-    endAt = null; timeLeft = MATCH_MS; ended = false; started = false;
+    endAt = null; timeLeft = MATCH_MS; ended = false; started = false; paused = false;
     get("skills-stop-time").value = 0;
     changed = true;
     updateClock();
@@ -240,12 +343,6 @@
     if (timeLeft === 0) { endAt = null; ended = true; get("skills-stop-time").value = 0; changed = true; }
     updateClock();
   }, 25);
-  get("export-skills").addEventListener("click", () => {
-    const eligible = state.teams.filter(team => participated(team.id)).map(team => team.id);
-    const rows = [["Rank", "Team", "Name", "Qualification", "Best driver", "Best autonomous", "Total", "Driver 1", "Driver 2", "Driver 3", "Autonomous 1", "Autonomous 2", "Autonomous 3", "Best driver stop", "Best autonomous stop"], ...Core.skillsStandings(state.teams, state.skills, eligible).map(row => [row.rank ?? "", row.id, row.name, admission(row.id), row.bestDriver, row.bestAuto, row.total, ...["driver", "autonomous"].flatMap(mode => [1, 2, 3].map(attempt => row.modes[mode].find(entry => entry.attempt === attempt)?.value ?? "")), row.driverStop, row.autoStop])];
-    const cell = value => { const text = String(value); return `"${(/^[=+@\-\t\r]/.test(text) ? "'" : "") + text.replace(/"/g, '""')}"`; };
-    download(rows.map(row => row.map(cell).join(",")).join("\r\n"), fileName("skills.csv"), "text/csv;charset=utf-8");
-  });
-  globalThis.SkillsUI = { render: renderSkills, reset, discard: () => { if (selection.team) loadSlot(); }, isDirty: () => changed, isRunning: () => endAt !== null };
+  globalThis.SkillsUI = { render: renderSkills, reset, discard: () => { if (selection.team) loadSlot(); }, isDirty: () => changed || paused, isRunning: () => endAt !== null };
   reset();
 })();

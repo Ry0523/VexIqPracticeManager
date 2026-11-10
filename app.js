@@ -28,7 +28,8 @@ let removingRobot = null;
 let analysisSort = { field: "rank", direction: "ascending" };
 
 const inSwitchWindow = ms => ms <= Core.TIMING.driverSwitch.openMs && ms >= Core.TIMING.driverSwitch.closeMs;
-const clockText = ms => { const seconds = Math.ceil(Math.min(MATCH_MS, ms) / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; };
+const clockText = ms => { const seconds = Math.ceil(Math.min(MATCH_MS, ms) / 1000); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; };
+const timerProgressAngle = ms => `${((MATCH_MS - Math.max(0, Math.min(MATCH_MS, ms))) * 360 / MATCH_MS).toFixed(2)}deg`;
 const fileName = suffix => `${ACTIVE_GAME.id}-${suffix}`;
 // Reuse filtered history arrays between renders so ScoreHistory can reuse resolved results.
 const memoByHistory = filter => { let source, key, value; return (records, extra) => { if (records !== source || extra !== key) { source = records; key = extra; value = filter(records, extra); } return value; }; };
@@ -189,12 +190,15 @@ function renderTeamAnalysis(rows = analysisRanking()) {
   get("team-analysis-sessions").innerHTML = Object.entries(detail.modes).flatMap(([mode, stats]) => {
     const sessions = new Map();
     for (const entry of stats.entries) {
-      if (!sessions.has(entry.sessionId)) sessions.set(entry.sessionId, { name: entry.eventName, values: [] });
+      if (!sessions.has(entry.sessionId)) {
+        const practice = entry.sessionId.startsWith("practice:");
+        sessions.set(entry.sessionId, { name: practice ? `Practice / ${History.localDateTime(entry.recordedAt)}` : entry.eventName, id: practice ? "" : entry.sessionId, values: [] });
+      }
       sessions.get(entry.sessionId).values.push(entry.score);
     }
     return [...sessions].map(([id, session]) => {
       const summary = History.statistics(session.values);
-      return `<tr><td>${escapeText(session.name)}<small>${escapeText(id)}</small></td><td>${names[mode]}</td><td>${summary.count}</td><td>${average(summary.best)}</td><td>${average(summary.average)}</td></tr>`;
+      return `<tr><td>${escapeText(session.name)}${session.id ? `<small>${escapeText(session.id)}</small>` : ""}</td><td>${names[mode]}</td><td>${summary.count}</td><td>${average(summary.best)}</td><td>${average(summary.average)}</td></tr>`;
     });
   }).join("") || '<tr><td colspan="5">No results for this team.</td></tr>';
 }
@@ -203,7 +207,7 @@ function activeMatches() { return state.selectedPhase === "finals" ? state.final
 function currentMatch() { return activeMatches().find(match => match.id === state.selected); }
 function matchLabel(match) { return `${match.phase === "finals" ? "F" : "Q"}${match.id}${match.phase === "finals" && match.round > 1 ? ` / TB${match.round - 1}` : ""}`; }
 function qualificationLocked() {
-  if (state.selectedPhase === "qualification" && state.finals.length) { notify("Finals alliances have been formed. Discard unplayed finals or start a new session before changing qualification scores."); return true; }
+  if (state.selectedPhase === "qualification" && state.finals.length) { notify("Finals alliances have been formed. Discard unplayed finals or end the event before changing qualification scores."); return true; }
   return false;
 }
 function clearFinalsStopTime() {
@@ -234,6 +238,31 @@ function idle() {
   return true;
 }
 let currentTab = "setup";
+let screenWakeLock = null;
+let screenWakePending = false;
+let screenWakeWanted = false;
+function syncScreenWakeLock(force = false) {
+  const wanted = !document.hidden && (document.fullscreenElement || document.body.classList.contains("flow-open") || deadline !== null || globalThis.SkillsUI?.isRunning() || globalThis.PracticeUI?.isRunning() || globalThis.TimerAudio.isStarting());
+  if (!force && Boolean(wanted) === screenWakeWanted) return;
+  screenWakeWanted = Boolean(wanted);
+  if (!screenWakeWanted) {
+    const lock = screenWakeLock;
+    screenWakeLock = null;
+    if (lock) lock.release().catch(() => {});
+    return;
+  }
+  if (screenWakeLock || screenWakePending || !navigator.wakeLock?.request) return;
+  screenWakePending = true;
+  try {
+    Promise.resolve(navigator.wakeLock.request("screen")).then(lock => {
+      if (!screenWakeWanted || document.hidden) { lock.release().catch(() => {}); return; }
+      screenWakeLock = lock;
+      lock.addEventListener("release", () => { if (screenWakeLock === lock) screenWakeLock = null; });
+    }).catch(() => {}).finally(() => { screenWakePending = false; });
+  } catch { screenWakePending = false; }
+}
+document.addEventListener("visibilitychange", () => syncScreenWakeLock(true));
+document.addEventListener("fullscreenchange", () => syncScreenWakeLock());
 const hostedHistory = globalThis.google?.script?.history;
 const tabNames = () => new Set([...document.querySelectorAll("[data-tab]")].filter(button => !button.hidden).map(button => button.dataset.tab).concat(accessRole() === "coach" ? "history" : [], canManageAccess() ? "access" : []));
 // Shared-app roles come from the server: coaches see everything; team members save new practice runs and read reviews
@@ -246,12 +275,25 @@ const accessRole = () => globalThis.EventStorage.access?.role || (globalThis.Eve
 const isMember = () => accessRole() === "member";
 // Coaches open the access list from Settings; it exists only in the shared app.
 const canManageAccess = () => accessRole() === "coach" && Boolean(globalThis.EventStorage.shared);
+const canPreviewStudent = () => globalThis.EventStorage.shared && globalThis.EventStorage.access?.isOwner === true && !globalThis.EventStorage.previewing;
 const hasSchedule = () => state.matches.length > 0 || state.finals.length > 0;
 const defaultTab = () => activeMatches().length && tabNames().has("control") ? "control" : { viewer: "rankings", member: "practice" }[accessRole()] || "setup";
 function readOnlyMessage() {
   const { email = "", domain = "" } = globalThis.EventStorage.access || {};
   const account = domain ? `a ${domain} Google account` : "a district Google account";
   return email ? `${email} can view results only. To score, ask a coach to add your account under Settings > Manage access.` : `You're viewing results only. To score, sign in with ${account} that a coach has added to the app's access list.`;
+}
+function renderStudentPreviewControls() {
+  const previewing = Boolean(globalThis.EventStorage.previewing);
+  const section = get("settings-student-preview");
+  section.hidden = !canPreviewStudent() || previewing;
+  const select = get("preview-student-team");
+  const previous = select.value;
+  select.innerHTML = state.teams.map(team => `<option value="${escapeText(team.id)}">${escapeText(team.id)} / ${escapeText(team.name)}</option>`).join("") || '<option value="">Add teams first</option>';
+  if (state.teams.some(team => team.id === previous)) select.value = previous;
+  get("preview-student-view").disabled = previewing || !state.teams.length;
+  get("student-preview-banner").hidden = !previewing;
+  get("student-preview-label").textContent = previewing ? `Student view preview / Team ${globalThis.EventStorage.access?.team || ""} / changes are not saved` : "";
 }
 function applyAccess() {
   const role = accessRole();
@@ -264,6 +306,7 @@ function applyAccess() {
   document.querySelector('[data-tab="control"]').textContent = role === "viewer" ? "Schedule" : "Match control";
   get("open-history").closest(".footer-history").hidden = role !== "coach";
   get("settings-access").hidden = !canManageAccess();
+  renderStudentPreviewControls();
   updateEventData();
   globalThis.RubricUI?.render();
   globalThis.InterviewUI?.render();
@@ -344,7 +387,7 @@ function tab(name, record = true) {
       if (nav.scrollWidth > nav.clientWidth) nav.scrollLeft = button.offsetLeft - nav.offsetLeft - (nav.clientWidth - button.offsetWidth) / 2;
     }
   });
-  if (name === "access" && changed) globalThis.AccessUI?.open();
+  if (name === "access") globalThis.AccessUI?.open();
   if (name === "history") get("open-history").setAttribute("aria-current", "page");
   else get("open-history").removeAttribute("aria-current");
 }
@@ -363,11 +406,11 @@ function render() {
   renderFooter();
   get("roster-lock").textContent = locked ? "Scheduled roster / edits available" : "Team directory";
   get("roster-empty").hidden = state.teams.length > 0;
-  get("roster").innerHTML = state.teams.map((team, index) => `<tr><td>${escapeText(team.id)}</td><td>${escapeText(team.name)}${robotLabel(team.id)}</td><td><div class="roster-actions"><button class="roster-move" data-move="${escapeText(team.id)}" data-direction="-1" aria-label="Move ${escapeText(team.id)} up" title="Move team up" ${index === 0 ? "disabled" : ""}>&#8593;</button><button class="roster-move" data-move="${escapeText(team.id)}" data-direction="1" aria-label="Move ${escapeText(team.id)} down" title="Move team down" ${index === state.teams.length - 1 ? "disabled" : ""}>&#8595;</button><button data-robots="${escapeText(team.id)}" aria-label="Robot versions for ${escapeText(team.id)}" title="Mark a new robot or review robot versions">Robots</button><button data-edit="${escapeText(team.id)}" aria-label="Edit ${escapeText(team.id)}">Edit</button><button data-remove="${escapeText(team.id)}" aria-label="Remove ${escapeText(team.id)}" title="${locked ? "Start a new session before removing teams" : "Remove team"}" ${locked ? "disabled" : ""}>&times;</button></div></td></tr>`).join("");
+  get("roster").innerHTML = state.teams.map((team, index) => `<tr><td>${escapeText(team.id)}</td><td>${escapeText(team.name)}${robotLabel(team.id)}</td><td><div class="roster-actions"><button class="roster-move" data-move="${escapeText(team.id)}" data-direction="-1" aria-label="Move ${escapeText(team.id)} up" title="Move team up" ${index === 0 ? "disabled" : ""}>&#8593;</button><button class="roster-move" data-move="${escapeText(team.id)}" data-direction="1" aria-label="Move ${escapeText(team.id)} down" title="Move team down" ${index === state.teams.length - 1 ? "disabled" : ""}>&#8595;</button><button data-robots="${escapeText(team.id)}" aria-label="Robot versions for ${escapeText(team.id)}" title="Mark a new robot or review robot versions">Robots</button><button data-edit="${escapeText(team.id)}" aria-label="Edit ${escapeText(team.id)}">Edit</button><button data-remove="${escapeText(team.id)}" aria-label="Remove ${escapeText(team.id)}" title="${locked ? "End event before removing teams" : "Remove team"}" ${locked ? "disabled" : ""}>&times;</button></div></td></tr>`).join("");
   [...get("roster").rows].forEach((row, index) => {
     const team = state.teams[index];
     const cell = row.insertCell(2);
-    cell.innerHTML = `<input type="checkbox" data-schedule-team="${escapeText(team.id)}" aria-label="Include ${escapeText(team.id)} in schedule" ${team.includeInSchedule !== false ? "checked" : ""} ${scheduleLocked ? "disabled" : ""} title="${scheduleLocked ? "Start a new session to change schedule inclusion" : "Include this team in generated teamwork matches"}">`;
+    cell.innerHTML = `<input type="checkbox" data-schedule-team="${escapeText(team.id)}" aria-label="Include ${escapeText(team.id)} in schedule" ${team.includeInSchedule !== false ? "checked" : ""} ${scheduleLocked ? "disabled" : ""} title="${scheduleLocked ? "End event to change schedule inclusion" : "Include this team in generated teamwork matches"}">`;
   });
   document.querySelectorAll("[data-roster-sort]").forEach(button => {
     button.disabled = state.teams.length < 2;
@@ -377,6 +420,7 @@ function render() {
   get("save-team").textContent = editingTeam === null ? "Add team" : "Save team";
   get("cancel-team-edit").hidden = editingTeam === null;
   ["rounds", "start-time", "interval", "generate"].forEach(id => { get(id).disabled = scheduleLocked; });
+  get("generate").hidden = scheduleLocked;
   get("clear-schedule").hidden = !locked;
   get("rounds").value = state.rounds;
   get("start-time").value = state.start;
@@ -402,9 +446,9 @@ function renderFinals() {
   get("generate-finals").hidden = Boolean(state.finals.length) || !state.matches.length;
   get("generate-finals").disabled = !ready || qualified < 2;
   get("finals-readiness").hidden = Boolean(state.finals.length) || !state.matches.length;
-  get("finals-readiness").textContent = !ready ? "Post every qualification match to generate finals." : qualified < 2 ? "At least two qualification teams are needed for finals." : `${qualified} qualification teams available.`;
+  get("finals-readiness").textContent = !ready ? "Enter scores for all regular matches before you make finals." : qualified < 2 ? "You need at least 2 teams to make finals." : `${qualified} teams are ready for finals.`;
   get("finals-team-count").max = Math.max(2, qualified - qualified % 2);
-  get("finals-count-help").textContent = `Choose an even number from 2 to ${Math.max(2, qualified - qualified % 2)} (${qualified} qualification teams available).`;
+  get("finals-count-help").textContent = `Choose an even number from 2 to ${Math.max(2, qualified - qualified % 2)}. ${qualified} teams are available.`;
   get("finals-section").hidden = !state.finals.length;
   get("clear-finals").hidden = !state.finals.length || started;
   get("generate-tiebreaker").hidden = !status.nextRound;
@@ -540,12 +584,14 @@ function updateScore() {
 const canResetTimer = () => deadline === null && remaining !== MATCH_MS && !globalThis.TimerAudio.isStarting();
 
 function updateTimer() {
+  syncScreenWakeLock();
   const seconds = Math.ceil(Math.min(MATCH_MS, remaining) / 1000);
   get("timer").textContent = clockText(remaining);
+  get("timer-dial").style.setProperty("--timer-progress-angle", timerProgressAngle(remaining));
   get("timer-stage").classList.toggle("warning", seconds > 0 && seconds * 1000 <= Core.TIMING.driverSwitch.openMs);
   get("timer-stage").classList.toggle("ended", seconds === 0);
   get("timer-label").textContent = seconds === 0 ? "MATCH COMPLETE" : deadline !== null ? (inSwitchWindow(seconds * 1000) ? "DRIVER SWITCH WINDOW" : "MATCH IN PROGRESS") : remaining === MATCH_MS ? "READY FOR MATCH" : "MATCH PAUSED";
-  if (remaining > MATCH_MS) get("timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(remaining - MATCH_MS)}`;
+  if (remaining > MATCH_MS && get("timer-countdown").checked) get("timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(remaining - MATCH_MS)}`;
   get("start-timer").textContent = deadline !== null ? "Pause match" : remaining === MATCH_MS ? "Start match" : "Resume match";
   if (globalThis.TimerAudio.isStarting()) get("timer-label").textContent = "PREPARING TIMER";
   get("start-timer").disabled = seconds === 0 || globalThis.TimerAudio.isStarting();
@@ -556,7 +602,7 @@ function updateTimer() {
 }
 
 function addTeams(entries) {
-  if (state.matches.length || state.skills.length) throw new Error("Start a new session before adding teams.");
+  if (state.matches.length || state.skills.length) throw new Error("End the event before adding teams.");
   if (state.teams.length + entries.length > 200) throw new Error("This local event supports up to 200 teams.");
   const known = new Set(state.teams.map(team => team.id));
   const draws = new Set(state.teams.map(team => team.draw));
@@ -804,7 +850,7 @@ get("roster").addEventListener("change", event => {
   if (!team) { notify("This team no longer exists. Reload the roster."); return; }
   if (state.matches.length) {
     input.checked = team.includeInSchedule !== false;
-    notify("Start a new session before changing schedule inclusion.");
+    notify("End the event before changing schedule inclusion.");
     return;
   }
   team.includeInSchedule = input.checked;
@@ -853,19 +899,20 @@ document.querySelectorAll("[data-roster-sort]").forEach(button => button.addEven
   persist(); render();
 }));
 get("rounds").addEventListener("input", updateEstimate);
-get("schedule-form").addEventListener("submit", event => {
+get("schedule-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (state.matches.length || !idle()) return;
   try {
     const rounds = Number(get("rounds").value);
     const matches = Core.schedule(state.teams, rounds);
     state.rounds = rounds; state.start = get("start-time").value; state.interval = Number(get("interval").value); state.matches = matches;
-    loadMatch(matches[0].id, true, "qualification"); tab("control");
+    loadMatch(matches[0].id, false, "qualification"); tab("control");
+    if (!await persist()) return;
     notify("Schedule created. An asterisk (*) marks an extra appearance that does not count toward that team's ranking.");
   } catch (error) { notify(error.message); }
 });
 get("clear-schedule").addEventListener("click", async () => {
-  if (!idle() || !(await ask("Start a new session? The active schedule and results will be cleared, and unposted edits discarded. Posted score history, saved notebook/interview evaluations, and your team roster will be kept.", "Start new session", true))) return;
+  if (!idle() || !(await ask("End this event? The active schedule and results will be cleared, and unposted edits discarded. Posted score history, saved notebook/interview evaluations, and your team roster will be kept.", "End event", true))) return;
   const next = { ...state, sessionId: History.newId(), matches: [], finals: [], finalsWithdrawn: [], selectedPhase: "qualification", skills: [], selected: null };
   document.querySelector("main").inert = true;
   document.querySelector(".topbar").inert = true;
@@ -874,7 +921,7 @@ get("clear-schedule").addEventListener("click", async () => {
   document.querySelector(".topbar").inert = false;
   if (!saved) return;
   state = next; dirty = false; resetTeamEditor(); globalThis.SkillsUI?.reset(); globalThis.PracticeUI?.reset(); globalThis.RubricUI?.reset(); globalThis.InterviewUI?.reset(); render();
-  notify("New session ready. Your roster, saved evaluations, and posted score history have been kept.");
+  notify("Event ended. Your roster, saved evaluations, and posted score history have been kept.");
 });
 document.querySelector(".match-list").addEventListener("click", async event => {
   const button = event.target.closest("[data-match]");
@@ -905,7 +952,7 @@ get("finals-form").addEventListener("submit", event => {
 });
 get("clear-finals").addEventListener("click", async () => {
   if (!idle() || !(await discardDraft())) return;
-  if (state.history.some(record => record.sessionId === state.sessionId && record.value.phase === "finals")) { notify("Finals with score history cannot be discarded. Start a new session instead."); return; }
+  if (state.history.some(record => record.sessionId === state.sessionId && record.value.phase === "finals")) { notify("Finals with score history cannot be discarded. End the event instead."); return; }
   if (!(await ask("Discard the unplayed finals alliances and unlock qualification scores?", "Discard finals", true))) return;
   state.finals = []; state.finalsWithdrawn = [];
   loadMatch(state.matches[0]?.id ?? null, true, "qualification");
@@ -1038,6 +1085,7 @@ async function enterFlow() {
   if (!currentMatch()) return;
   fieldControl.classList.add("flow-mode");
   document.body.classList.add("flow-open");
+  syncScreenWakeLock();
   get("notice").hidden = true;
   setFlowStep("timer");
   updateFlowNext();
@@ -1052,6 +1100,7 @@ function exitFlow() {
   if (!fieldControl.classList.contains("flow-mode")) return;
   fieldControl.classList.remove("flow-mode");
   document.body.classList.remove("flow-open");
+  syncScreenWakeLock();
   delete fieldControl.dataset.flowStep;
   clearInterval(flowWatch);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -1098,12 +1147,65 @@ setInterval(() => {
 }, 25);
 const settingsTray = get("settings-tray");
 get("open-settings").addEventListener("click", () => settingsTray.showModal());
+get("open-settings").addEventListener("click", renderStudentPreviewControls);
 get("close-settings").addEventListener("click", () => settingsTray.close());
 settingsTray.addEventListener("click", event => { if (event.target === settingsTray) settingsTray.close(); });
 settingsTray.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); settingsTray.close(); } });
 settingsTray.querySelectorAll("section button").forEach(button => button.addEventListener("click", () => settingsTray.close()));
+get("open-settings").addEventListener("click", renderStudentPreviewControls);
+get("preview-student-view").addEventListener("click", async () => {
+  const team = get("preview-student-team").value;
+  if (!canPreviewStudent() || !team) return;
+  if (!idle() || dirty || unsaved || globalThis.PracticeUI?.isDirty() || globalThis.RubricUI?.isDirty() || globalThis.InterviewUI?.isDirty()) {
+    notify("Finish or discard current work before starting a student preview.");
+    return;
+  }
+  settingsTray.close();
+  const main = document.querySelector("main");
+  main.inert = true;
+  document.querySelector(".topbar").inert = true;
+  try {
+    const preview = await globalThis.EventStorage.previewMember(team);
+    state = validateState(preview);
+    dirty = false; unsaved = false; staleNotice = false; rosterSort = null;
+    resetTeamEditor();
+    globalThis.SkillsUI?.reset(); globalThis.PracticeUI?.reset(); globalThis.RubricUI?.reset(); globalThis.InterviewUI?.reset();
+    render();
+    applyAccess();
+    tab(defaultTab(), false);
+    setupHistory();
+    notify(`Student preview opened for team ${team}. Changes will not be saved to the shared event.`);
+  } catch (error) {
+    notify(`Could not open student preview: ${error.message}`);
+  } finally {
+    main.inert = false;
+    document.querySelector(".topbar").inert = false;
+  }
+});
+get("exit-student-preview").addEventListener("click", async () => {
+  if (!globalThis.EventStorage.previewing || !idle()) return;
+  if (!(await ask("Exit student preview? Practice runs and reviews created in the preview will be discarded.", "Exit preview", true))) return;
+  await reloadEvent(false);
+});
 try { if (localStorage.getItem("level-up-sound") === "off") get("sound").checked = false; } catch {}
-get("sound").addEventListener("change", () => { try { localStorage.setItem("level-up-sound", get("sound").checked ? "on" : "off"); } catch {} });
+const syncSoundButtons = () => document.querySelectorAll(".timer-sound-toggle").forEach(button => {
+  const enabled = get("sound").checked;
+  button.setAttribute("aria-pressed", String(enabled));
+  button.title = enabled ? "Disable timer sound" : "Enable timer sound";
+  button.querySelector(".sound-icon-on").toggleAttribute("hidden", !enabled);
+  button.querySelector(".sound-icon-off").toggleAttribute("hidden", enabled);
+});
+get("sound").addEventListener("change", () => {
+  try { localStorage.setItem("level-up-sound", get("sound").checked ? "on" : "off"); } catch {}
+  syncSoundButtons();
+});
+document.querySelectorAll(".timer-sound-toggle").forEach(button => button.addEventListener("click", () => {
+  get("sound").checked = !get("sound").checked;
+  get("sound").dispatchEvent(new Event("change", { bubbles: true }));
+}));
+syncSoundButtons();
+try { if (localStorage.getItem("level-up-countdown") === "off") get("timer-countdown").checked = false; } catch {}
+get("timer-countdown").addEventListener("change", () => { try { localStorage.setItem("level-up-countdown", get("timer-countdown").checked ? "on" : "off"); } catch {} });
 get("export-backup").addEventListener("click", async () => {
   if ((dirty || globalThis.SkillsUI?.isDirty() || globalThis.PracticeUI?.isDirty() || globalThis.RubricUI?.isDirty() || globalThis.InterviewUI?.isDirty()) && !(await ask("Unposted scores and unsaved evaluations are not included in backups. Export saved data anyway?", "Export anyway"))) return;
   download(JSON.stringify(state, null, 2), fileName("event.json"), "application/json");
@@ -1130,11 +1232,6 @@ get("backup-file").addEventListener("change", async event => {
     tab(state.matches.length ? "control" : "setup"); notify(from ? `Event backup imported. ${rolloverMessage(from)}` : "Event backup imported.");
   } catch (error) { notify(`Import failed: ${error.message}`); }
   finally { event.target.value = ""; }
-});
-get("export-csv").addEventListener("click", () => {
-  const cell = value => { const text = String(value); return `"${(/^[=+@\-\t\r]/.test(text) ? "'" : "") + text.replace(/"/g, '""')}"`; };
-  const rows = [["Rank", "Team", "Name", "Played", "Dropped", "Average"], ...Core.standings(state.teams, state.matches).map((row, index) => [index + 1, row.id, row.name, row.played, row.excluded.length, average(row.average)])];
-  download(rows.map(row => row.map(cell).join(",")).join("\r\n"), fileName("standings.csv"), "text/csv;charset=utf-8");
 });
 get("export-finals").addEventListener("click", () => {
   const status = Finals.outcome(state.finals);

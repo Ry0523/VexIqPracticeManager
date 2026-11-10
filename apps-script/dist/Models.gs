@@ -497,7 +497,7 @@
     if (!Array.isArray(records)) throw new Error("Invalid score history.");
     const ids = new Set();
     for (const record of records) {
-      if (!record || typeof record.id !== "string" || !record.id || ids.has(record.id) || typeof record.sessionId !== "string" || !record.sessionId || typeof record.eventName !== "string" || record.eventName.length > 80 || typeof record.skillsOnly !== "boolean" || !["posted", "updated", "removed", "voided", "migrated"].includes(record.action) || (record.recordedAt !== null && (typeof record.recordedAt !== "string" || !Number.isFinite(Date.parse(record.recordedAt))))) throw new Error("Invalid score history record.");
+      if (!record || typeof record.id !== "string" || !record.id || ids.has(record.id) || typeof record.sessionId !== "string" || !record.sessionId || typeof record.eventName !== "string" || record.eventName.length > 80 || typeof record.skillsOnly !== "boolean" || !["posted", "updated", "promoted", "removed", "voided", "migrated"].includes(record.action) || (record.recordedAt !== null && (typeof record.recordedAt !== "string" || !Number.isFinite(Date.parse(record.recordedAt))))) throw new Error("Invalid score history record.");
       ids.add(record.id);
       if (record.game !== undefined && !Game.validId(record.game)) throw new Error(`Score history uses unknown game "${record.game}". Add its definition to games/ before loading this data.`);
       const game = gameOf(record);
@@ -676,6 +676,17 @@
     return { ...copy(previous), id: newId(), recordedAt: new Date().toISOString(), action: "removed" };
   }
 
+  function promotePractice(records, runId) {
+    const previous = resolve(records).find(record => record.source === "practice" && record.runId === runId);
+    if (!previous) throw new Error("This practice run no longer exists. Reload the latest data.");
+    if (previous.runRole !== "member") throw new Error("Only student practice runs can be promoted.");
+    const previousTime = Date.parse(previous.recordedAt);
+    const recordedAt = new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : Date.now())).toISOString();
+    const promoted = { ...copy(previous), id: newId(), recordedAt, action: "promoted", runRole: "coach" };
+    validate([promoted]);
+    return promoted;
+  }
+
   function statistics(values) {
     const sorted = [...values].sort((a, b) => a - b);
     const count = sorted.length;
@@ -811,14 +822,14 @@
         const partner = match.teams.find(id => id !== teamId);
         const status = match.result.statuses[teamId];
         const fieldScore = Core.score(match.result.counts, gameOf(record));
-        const entry = { recordId: record.id, sessionId: record.sessionId, eventName: record.eventName, recordedAt: record.source === "practice" ? record.occurredAt : record.recordedAt, label: record.source === "practice" ? "Practice" : `${match.phase === "finals" ? "F" : "Q"}${match.id}`, status, score: teamScore(match, teamId, gameOf(record)), fieldScore, surrogate: match.surrogate === teamId, partner };
+        const entry = { recordId: record.id, sessionId: record.sessionId, eventName: record.eventName, recordedAt: record.source === "practice" ? record.occurredAt : record.recordedAt, label: record.source === "practice" ? record.runRole === "member" ? "Student practice (not ranked)" : "Coach practice" : `${match.phase === "finals" ? "F" : "Q"}${match.id}`, status, score: teamScore(match, teamId, gameOf(record)), fieldScore, surrogate: match.surrogate === teamId, partner };
         groups.teamwork.push(entry);
         if (!partner) continue;
         if (!partners.has(partner)) partners.set(partner, { id: partner, name: record.teams.find(team => team.id === partner).name, entries: [] });
         partners.get(partner).entries.push(entry);
       } else if (record.value.team === teamId && include(record, teamId)) {
         const entry = record.value;
-        groups[entry.mode].push({ recordId: record.id, sessionId: record.sessionId, eventName: record.eventName, recordedAt: record.source === "practice" ? record.occurredAt : record.recordedAt, label: record.source === "practice" ? "Practice" : `Attempt ${entry.attempt}`, status: entry.status, score: entry.status === "ok" ? Core.score(entry.counts, gameOf(record)) : 0 });
+        groups[entry.mode].push({ recordId: record.id, sessionId: record.sessionId, eventName: record.eventName, recordedAt: record.source === "practice" ? record.occurredAt : record.recordedAt, label: record.source === "practice" ? record.runRole === "member" ? "Student practice (not ranked)" : "Coach practice" : `Attempt ${entry.attempt}`, status: entry.status, score: entry.status === "ok" ? Core.score(entry.counts, gameOf(record)) : 0 });
       }
     }
     const summarize = entries => {
@@ -827,6 +838,13 @@
       const previous = timed.slice(Math.max(0, timed.length - recent.length - 5), timed.length - recent.length);
       const recentAverage = statistics(recent.map(entry => entry.score)).average;
       const previousAverage = statistics(previous.map(entry => entry.score)).average;
+      const best = statistics(entries.map(entry => entry.score)).best;
+      const bestDates = timed.filter(entry => entry.score === best);
+      const bestDate = best === null ? "--" : bestDates.length ? localDate(bestDates[0].recordedAt) : "Unknown";
+      const rolling = timed.map((entry, index) => ({
+        ...entry, rollingAverage: statistics(timed.slice(Math.max(0, index - 4), index + 1).map(item => item.score)).average,
+        rollingCount: Math.min(5, index + 1)
+      }));
       return {
         ...statistics(entries.map(entry => entry.score)), entries,
         dq: entries.filter(entry => entry.status === "dq").length,
@@ -834,7 +852,8 @@
         forfeit: entries.filter(entry => entry.status === "forfeit").length,
         surrogate: entries.filter(entry => entry.surrogate).length,
         timed, unknownDates: entries.length - timed.length, recentCount: recent.length, previousCount: previous.length,
-        recentAverage, previousAverage, change: previousAverage === null ? null : recentAverage - previousAverage
+        recentAverage, previousAverage, change: previousAverage === null ? null : recentAverage - previousAverage,
+        recentBest: statistics(recent.map(entry => entry.score)).best, bestDate, rolling
       };
     };
     return {
@@ -876,7 +895,7 @@
     return [headers, ...rows].map(row => row.map(cell).join(",")).join("\r\n");
   }
 
-  const api = { gameOf, forGame: Game.forGame, newId, teamDirectory, capture, validate, initialize, merge, csv, skillKey, resultKey, resolve, statistics, analyze, skillsRanking, teamworkRanking, teamAnalysis, filterSource, practiceRecord, removePractice, localDate, localDateTime, validateRobots, robotVersions, currentRobot, robotAttribution, currentRobotOnly, robotComparison, renameRobots, abandonRobot, restoreRobot };
+  const api = { gameOf, forGame: Game.forGame, newId, teamDirectory, capture, validate, initialize, merge, csv, skillKey, resultKey, resolve, statistics, analyze, skillsRanking, teamworkRanking, teamAnalysis, filterSource, practiceRecord, promotePractice, removePractice, localDate, localDateTime, validateRobots, robotVersions, currentRobot, robotAttribution, currentRobotOnly, robotComparison, renameRobots, abandonRobot, restoreRobot };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ScoreHistory = api;
 })(globalThis);
@@ -889,22 +908,22 @@
   const legacyId = entry => `legacy:${Game.of(entry)}|${entry.team.id}`;
   const historyModel = () => typeof module !== "undefined" && module.exports ? require("./history.js") : root.ScoreHistory;
   const notebookCriteria = [
-    { id: "navigation", section: "Notebook organization", title: "Finding information", prompt: "Review how easily a reader can navigate to a particular entry." },
-    { id: "contributors", section: "Notebook organization", title: "Team and contributor identification", prompt: "Check whether the notebook identifies the team and the students responsible for entries." },
-    { id: "season", section: "Notebook organization", title: "Season-long record", prompt: "Review the distribution and consistency of dated entries across the season." },
-    { id: "sources", section: "Notebook organization", title: "Source attribution", prompt: "Check how outside contributions are credited alongside the work that uses them." },
-    { id: "constraints", section: "Define", title: "Problem, criteria, and constraints", prompt: "Review the challenge definition and the limits a successful solution must satisfy." },
-    { id: "strategy", section: "Define", title: "Game strategy", prompt: "Look for the reasoning and tradeoffs behind scoring priorities." },
-    { id: "brainstorm", section: "Define", title: "Brainstorming", prompt: "Review the range of candidate approaches and how they are compared." },
-    { id: "prototypes", section: "Develop solutions", title: "Prototype development", prompt: "Trace the progression between successive prototypes." },
-    { id: "procedures", section: "Develop solutions", title: "Test procedures", prompt: "Consider whether another person could repeat the team's tests." },
-    { id: "data", section: "Develop solutions", title: "Data collection", prompt: "Review the observations and measurements recorded for making decisions." },
-    { id: "decisions", section: "Develop solutions", title: "Evidence-based decisions", prompt: "Look for a connection between choices, supporting evidence, and the people involved." },
-    { id: "mechanisms", section: "Optimize", title: "Mechanism documentation", prompt: "Review how visual and written explanations communicate the built mechanism." },
-    { id: "code", section: "Optimize", title: "Code documentation", prompt: "Consider how the notebook explains software intent and development." },
-    { id: "changes", section: "Optimize", title: "Changes linked to test results", prompt: "Trace robot and software revisions back to testing evidence." },
-    { id: "reflection", section: "Reflection and iteration", title: "Ongoing reflection", prompt: "Look for evaluation of progress that informs subsequent work." },
-    { id: "iteration", section: "Reflection and iteration", title: "Visible iteration", prompt: "Trace repeated design cycles across building, strategy, and programming." }
+    { id: "navigation", section: "Notebook organization", title: "Information is easy to reference", prompt: "Review how easily a reader can navigate to a particular entry." },
+    { id: "contributors", section: "Notebook organization", title: "Contributors are identifiable", prompt: "Check whether the notebook identifies the team and the students responsible for entries." },
+    { id: "season", section: "Notebook organization", title: "Record spans the season", prompt: "Review the distribution and consistency of dated entries across the season." },
+    { id: "sources", section: "Notebook organization", title: "Outside sources are credited", prompt: "Check how outside contributions are credited alongside the work that uses them." },
+    { id: "constraints", section: "Define", title: "Criteria and constraints are defined", prompt: "Review the challenge definition and the limits a successful solution must satisfy." },
+    { id: "strategy", section: "Define", title: "Game strategy is documented", prompt: "Look for the reasoning and tradeoffs behind scoring priorities." },
+    { id: "brainstorm", section: "Define", title: "Brainstorming is documented", prompt: "Review the range of candidate approaches and how they are compared." },
+    { id: "prototypes", section: "Develop solutions", title: "Prototypes are documented", prompt: "Trace the progression between successive prototypes." },
+    { id: "procedures", section: "Develop solutions", title: "Test procedures are defined", prompt: "Consider whether another person could repeat the team's tests." },
+    { id: "data", section: "Develop solutions", title: "Data is collected", prompt: "Review the observations and measurements recorded for making decisions." },
+    { id: "decisions", section: "Develop solutions", title: "Decisions are explained with evidence", prompt: "Look for a connection between choices, supporting evidence, and the people involved." },
+    { id: "mechanisms", section: "Optimize", title: "Mechanisms are documented", prompt: "Review how visual and written explanations communicate the built mechanism." },
+    { id: "code", section: "Optimize", title: "Code is documented", prompt: "Consider how the notebook explains software intent and development." },
+    { id: "changes", section: "Optimize", title: "Changes are traceable to results", prompt: "Trace robot and software revisions back to testing evidence." },
+    { id: "reflection", section: "Reflection and iteration", title: "Reflection appears throughout", prompt: "Look for evaluation of progress that informs subsequent work." },
+    { id: "iteration", section: "Reflection and iteration", title: "Iteration is visible in sequence", prompt: "Trace repeated design cycles across building, strategy, and programming." }
   ];
   const text = (value, limit) => typeof value === "string" && value.length <= limit;
   const date = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
@@ -1023,12 +1042,12 @@
 
   const api = createRubric(notebookCriteria, 1, 4, "notebook");
   const interview = createRubric([
-    { id: "own-work", section: "Explain your learning", title: "Understanding their own work", prompt: "Explore how students explain a robot feature, program, or strategy and the reasoning behind it." },
-    { id: "development", section: "Explain your learning", title: "Explaining the development journey", prompt: "Listen for a sequence of attempts, obstacles, and discoveries that influenced the team's approach." },
-    { id: "evidence", section: "Explain your learning", title: "Supporting performance with evidence", prompt: "Ask how the team checked its solution and what the results taught them." },
-    { id: "shared-learning", section: "Working with others", title: "Learning together", prompt: "Look for examples of students exchanging skills and building on one another's understanding." },
-    { id: "shared-decisions", section: "Working with others", title: "Collaborative decision-making", prompt: "Explore how students participate in choices and work through differing opinions." },
-    { id: "adaptation", section: "Working with others", title: "Adapting outside inspiration", prompt: "Ask how the team credited, modified, tested, and understood an idea from elsewhere." }
+    { id: "own-work", section: "Explain your learning", title: "Students explain their own work", prompt: "Explore how students explain a robot feature, program, or strategy and the reasoning behind it.", questions: ["Which part of the robot, code, or game plan did you work on?", "How does it work, and why did you choose that approach?"] },
+    { id: "development", section: "Explain your learning", title: "Students trace how they got there", prompt: "Listen for a sequence of attempts, obstacles, and discoveries that influenced the team's approach.", questions: ["What did you try first, and what did you try next?", "What did not work as expected, and what did you learn from it?"] },
+    { id: "evidence", section: "Explain your learning", title: "Students show how they know it works", prompt: "Ask how the team checked its solution and what the results taught them.", questions: ["How did you check whether your robot worked as planned?", "What did you observe or measure, and what changed because of the result?"] },
+    { id: "shared-learning", section: "Working with others", title: "Students learned from and with each other", prompt: "Look for examples of students exchanging skills and building on one another's understanding.", questions: ["What is something a teammate taught you?", "How did you help someone else learn a skill?"] },
+    { id: "shared-decisions", section: "Working with others", title: "Decisions were made together", prompt: "Explore how students participate in choices and work through differing opinions.", questions: ["Tell us about a choice your team had to make.", "How did everyone share ideas and agree on what to try?"] },
+    { id: "adaptation", section: "Working with others", title: "Outside ideas were made their own", prompt: "Ask how the team credited, modified, tested, and understood an idea from elsewhere.", questions: ["Did an outside idea inspire your robot or code?", "How did you adapt or test that idea, and how did you credit its source?"] }
   ], 0, 2, "interview");
   api.Interview = interview;
   api.combinedRanking = function (records, teams = [], notebooks = [], interviews = [], include = () => true) {
@@ -1042,14 +1061,15 @@
     const teamwork = new Map(History.teamworkRanking(records, allTeams, include).map(row => [row.id, row]));
     const skillLeader = Math.max(0, ...skills.map(row => row.total));
     const teamworkLeader = Math.max(0, ...[...teamwork.values()].map(row => row.best ?? 0));
+    const leaderPoints = (score, leader) => leader > 0 ? 25 * Math.log1p(score) / Math.log1p(leader) : 0;
     const rows = skills.map(team => {
       const match = teamwork.get(team.id);
       const notebook = api.current(notebooks, team.id);
       const interviewEntry = interview.current(interviews, team.id);
       const notebookSummary = notebook || { total: 0, scored: 0 };
       const interviewSummary = interviewEntry || { total: 0, scored: 0 };
-      const skillsPoints = skillLeader ? team.total / skillLeader * 25 : 0;
-      const teamworkPoints = teamworkLeader ? (match.best ?? 0) / teamworkLeader * 25 : 0;
+      const skillsPoints = leaderPoints(team.total, skillLeader);
+      const teamworkPoints = leaderPoints(match.best ?? 0, teamworkLeader);
       const notebookPoints = notebookSummary.total / 64 * 40;
       const interviewPoints = interviewSummary.total / 12 * 10;
       const missing = [];

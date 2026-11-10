@@ -19,22 +19,33 @@ async function sharedPage(browser, page, access, prepare = async () => {}) {
   await viewer.addInitScript(({ eventJson, access }) => {
     window.__saves = 0;
     window.__failSaves = 0;
+    window.__accessLoads = 0;
     window.__access = [];
-    let revision = 3;
-    let current = eventJson;
+    let revision = Number(localStorage.getItem("__sharedRevision") || 3);
+    let current = localStorage.getItem("__sharedEvent") || eventJson;
+    const saveCurrent = event => { current = JSON.stringify(event); localStorage.setItem("__sharedEvent", current); };
+    const nextRevision = () => { revision++; localStorage.setItem("__sharedRevision", String(revision)); return revision; };
     // Simulates another operator saving a newer event.
     window.__current = () => current;
-    window.__publish = change => { const event = JSON.parse(current); change(event); current = JSON.stringify(event); revision++; };
+    window.__publish = change => { const event = JSON.parse(current); change(event); saveCurrent(event); nextRevision(); };
     const owner = "owner@nu-district.org";
     const list = () => JSON.stringify({ ok: true, owner, domain: "nu-district.org", entries: window.__access });
     const attempt = save => { window.__saves++; if (window.__failSaves > 0) { window.__failSaves--; throw new Error("NetworkError: Connection failure due to HTTP 0"); } if (!access.canEdit) return JSON.stringify({ ok: false, code: "REFUSED", message: "Read-only access" }); return JSON.stringify(save()); };
     const api = {
       loadEventJson: () => JSON.stringify({ ok: true, revision, event: JSON.parse(current), access }),
+      previewMemberJson: team => {
+        if (access.isOwner !== true) throw new Error("App owner access required to preview the student view.");
+        const event = JSON.parse(current);
+        if (!event.teams.some(entry => entry.id === team)) throw new Error("Choose a team on the active roster to preview.");
+        const redact = entry => entry.team.id === team ? entry : { ...entry, reviewer: "", overallNotes: "", notes: Object.fromEntries(Object.keys(entry.notes).map(id => [id, ""])) };
+        const previewEvent = { ...event, rubrics: event.rubrics.map(redact), interviews: event.interviews.map(redact) };
+        return JSON.stringify({ ok: true, revision, event: previewEvent, access: { canEdit: true, role: "member", team, email: "student-preview@nu-district.org", domain: "nu-district.org" }, previewing: true });
+      },
       eventRevisionJson: () => JSON.stringify({ ok: true, revision }),
-      saveEventJson: json => attempt(() => { const request = JSON.parse(json); if (request.revision !== revision) return { ok: false, code: "CONFLICT", message: "Another operator saved a newer event." }; current = JSON.stringify(request.event); return { ok: true, revision: ++revision }; }),
+      saveEventJson: json => attempt(() => { const request = JSON.parse(json); if (request.revision !== revision) return { ok: false, code: "CONFLICT", message: "Another operator saved a newer event." }; saveCurrent(request.event); return { ok: true, revision: nextRevision() }; }),
       // Merges the page's changes into the latest event, as the real server does.
-      saveChangesJson: json => attempt(() => { const merged = EventChanges.apply(JSON.parse(current), JSON.parse(json).changes); if (merged.conflicts.length) return { ok: false, code: "CONFLICT", message: `Another operator changed ${merged.conflicts.join(", ")} at the same time.` }; current = JSON.stringify(merged.event); return { ok: true, previous: revision, revision: ++revision }; }),
-      loadAccessJson: () => { if (access.role !== "coach") throw new Error("Only coaches can view the access list."); return list(); },
+      saveChangesJson: json => attempt(() => { const merged = EventChanges.apply(JSON.parse(current), JSON.parse(json).changes); if (merged.conflicts.length) return { ok: false, code: "CONFLICT", message: `Another operator changed ${merged.conflicts.join(", ")} at the same time.` }; saveCurrent(merged.event); return { ok: true, previous: revision, revision: nextRevision() }; }),
+      loadAccessJson: () => { window.__accessLoads++; if (access.role !== "coach") throw new Error("Only coaches can view the access list."); return list(); },
       saveAccessJson: json => { if (access.role !== "coach") throw new Error("Only coaches can change the access list."); window.__access = JSON.parse(json).entries; return list(); }
     };
     const run = {
@@ -48,6 +59,74 @@ async function sharedPage(browser, page, access, prepare = async () => {}) {
 }
 
 const sharedViewerPage = (browser, page) => sharedPage(browser, page, { canEdit: false, email: "parent@gmail.com", domain: "nu-district.org" });
+
+test("coach Settings can preview a team member view without saving preview edits", async ({ browser, page }) => {
+  const coach = await sharedPage(browser, page, { canEdit: true, role: "coach", email: "owner@nu-district.org", domain: "nu-district.org", isOwner: true });
+  await coach.goto("/index.html");
+  await expect(coach.locator("body")).not.toHaveClass(/member/);
+  const originalName = await coach.evaluate(() => JSON.parse(window.__current()).name);
+  await coach.click("#open-settings");
+  await expect(coach.locator("#settings-student-preview")).toBeVisible();
+  await coach.selectOption("#preview-student-team", "3A");
+  await coach.click("#preview-student-view");
+  await expect(coach.locator("body")).toHaveClass(/member/);
+  await expect(coach.locator("#student-preview-banner")).toContainText("Team 3A");
+  await expect(coach.locator('[data-tab="setup"]')).toBeHidden();
+  await expect(coach.locator('[data-tab="practice"]')).toBeVisible();
+  await expect(coach.locator("#practice-team")).toHaveValue("3A");
+  expect(await coach.evaluate(() => EventStorage.access)).toMatchObject({ role: "member", team: "3A" });
+
+  expect(await coach.evaluate(async () => { state.name = "Preview-only edit"; return persist(); })).toBe(true);
+  expect(await coach.evaluate(() => JSON.parse(window.__current()).name)).toBe(originalName);
+  expect(await coach.evaluate(() => window.__saves)).toBe(0);
+
+  await coach.evaluate(() => { window.__confirmAnswer = null; });
+  await coach.click("#exit-student-preview");
+  await expect(coach.locator("#confirm-message")).toContainText("Practice runs and reviews created in the preview will be discarded");
+  await coach.click("#confirm-ok");
+  await expect(coach.locator("body")).not.toHaveClass(/member/);
+  await expect(coach.locator("#student-preview-banner")).toBeHidden();
+  expect(await coach.evaluate(() => state.name)).toBe(originalName);
+  expect(await coach.evaluate(() => window.__saves)).toBe(0);
+  await coach.context().close();
+});
+
+test("listed non-owner coaches cannot preview the student view", async ({ browser, page }) => {
+  const coach = await sharedPage(browser, page, { canEdit: true, role: "coach", email: "coach@nu-district.org", domain: "nu-district.org", isOwner: false });
+  await coach.goto("/index.html");
+  await coach.click("#open-settings");
+  await expect(coach.locator("#settings-access")).toBeVisible();
+  await expect(coach.locator("#settings-student-preview")).toBeHidden();
+  expect(await coach.evaluate(async () => {
+    try { await EventStorage.previewMember("3A"); return false; }
+    catch (error) { return error.message === "App owner access required to preview the student view."; }
+  })).toBe(true);
+  await coach.context().close();
+});
+
+test("a generated shared schedule survives a page reload", async ({ browser, page }) => {
+  const coach = await sharedPage(browser, page, { canEdit: true, role: "coach", email: "coach@nu-district.org", domain: "nu-district.org" }, async localPage => {
+    await localPage.evaluate(() => {
+      state.matches = [];
+      state.finals = [];
+      state.finalsWithdrawn = [];
+      state.skills = [];
+      state.history = [];
+      state.selected = null;
+      state.selectedPhase = "qualification";
+    });
+  });
+  await coach.goto("/index.html");
+  await expect(coach.locator("body")).not.toHaveClass(/read-only/);
+  await coach.fill("#rounds", "2");
+  await coach.click("#generate");
+  await expect.poll(() => coach.evaluate(() => JSON.parse(window.__current()).matches.length)).toBe(4);
+
+  await coach.reload();
+  await expect(coach.locator("#match-list button")).toHaveCount(4);
+  expect(await coach.evaluate(() => state.matches.length)).toBe(4);
+  await coach.context().close();
+});
 
 test("shared pages pick up scores saved elsewhere, but never discard work in progress", async ({ browser, page }) => {
   const coach = await sharedPage(browser, page, { canEdit: true, role: "coach", email: "coach@nu-district.org", domain: "nu-district.org" });
@@ -139,7 +218,7 @@ async function review(page, team, note) {
   await page.selectOption("#rubric-team", team);
   await page.fill("#rubric-date", "2026-10-01");
   await page.fill("#rubric-reviewer", "Coach Lee");
-  await page.locator("#rubric-criteria select").first().selectOption("3");
+  await page.locator('#rubric-criteria .rubric-guidance-option[data-guidance-score="3"]').first().click();
   await page.locator("#rubric-criteria textarea").first().fill(note);
   await page.click("#save-rubric");
   await expect(page.locator("#rubric-history-rows tr")).toHaveCount(1);
@@ -170,9 +249,8 @@ test("shared-app viewers outside the editor domain get a results-only view that 
   await expect(viewer.locator("#analysis-rows tr")).toHaveCount(4);
 
   // No printing, exports, settings, or score history; the page keeps itself up to date instead.
-  for (const id of ["#open-settings", "#export-csv", "#open-history"]) await expect(viewer.locator(id)).toBeHidden();
+  for (const id of ["#open-settings", "#open-history"]) await expect(viewer.locator(id)).toBeHidden();
   await viewer.click('[data-tab="skills-rankings"]');
-  await expect(viewer.locator("#export-skills")).toBeHidden();
   await viewer.click('[data-tab="control"]');
   await expect(viewer.locator("#print-schedule")).toBeHidden();
   await expect(viewer.locator("#export-finals")).toBeHidden();
@@ -210,6 +288,8 @@ test("team members can review any team, read their own team's feedback, and save
 
   // Practice: save a new run; saved runs have no Edit button.
   await member.click('[data-tab="practice"]');
+  await expect(member.locator("#practice-team")).toHaveValue("2A");
+  await expect(member.locator("#practice-partner")).not.toHaveValue("2A");
   await member.locator('#practice-scoring-inputs [data-step="1"]').first().click();
   await member.click("#save-practice");
   await expect(member.locator("#practice-runs tr")).toHaveCount(1);
@@ -239,11 +319,12 @@ test("team members can review any team, read their own team's feedback, and save
   await expect(member.locator("#rubric-history-rows")).not.toContainText("Team one note");
   await expect(member.locator("#rubric-history-rows [data-review-notes]")).toHaveCount(0);
   await member.click('[data-tab="interview"]');
+  await expect(member.locator("#interview-team")).toHaveValue("2A");
   await expect(member.locator("#interview-form")).toBeVisible();
 
   await member.click("#open-settings");
   await expect(member.locator("#settings-event-data")).toBeHidden();
-  await expect(member.locator("#sound")).toBeVisible();
+  await expect(member.locator("#sound")).toBeHidden();
   await member.keyboard.press("Escape");
 
   // Score history cannot be opened by URL either.
@@ -270,24 +351,34 @@ test("coaches manage the access list from Settings; it is not offered outside th
   await expect(coach.locator("#access-view")).toBeVisible();
   await expect(coach.locator("#access-owner")).toHaveText("owner@nu-district.org");
   await expect(coach.locator("#access-rows tr")).toHaveCount(1);
+  expect(await coach.evaluate(() => window.__accessLoads)).toBe(1);
 
+  await coach.click("#open-settings");
+  await coach.click("#open-access");
+  await expect.poll(() => coach.evaluate(() => window.__accessLoads)).toBe(2);
+
+  await coach.fill("#access-name", "Parent Example");
   await coach.fill("#access-email", "parent@gmail.com");
   await coach.click("#save-access");
   await expect(coach.locator("#notice-message")).toContainText("Only @nu-district.org accounts");
   expect(await coach.evaluate(() => window.__access.length)).toBe(0);
 
+  await coach.fill("#access-name", "Sam Student");
   await coach.fill("#access-email", "Student@NU-District.org");
   await coach.selectOption("#access-team", "3A");
   await coach.click("#save-access");
   await expect(coach.locator("#notice-message")).toContainText("student@nu-district.org added as a team 3A member");
+  await coach.fill("#access-name", "Coach Lee");
   await coach.fill("#access-email", "lee@nu-district.org");
   await coach.selectOption("#access-role", "coach");
   await expect(coach.locator("#access-team")).toBeDisabled();
   await coach.click("#save-access");
   await expect(coach.locator("#access-rows tr")).toHaveCount(3);
+  await expect(coach.locator("#access-rows tr").nth(1)).toContainText("Coach Lee");
   await expect(coach.locator("#access-rows tr").nth(1)).toContainText("lee@nu-district.org");
+  await expect(coach.locator("#access-rows tr").nth(2)).toContainText("Sam Student");
   await expect(coach.locator("#access-rows tr").nth(2)).toContainText("3A");
-  expect(await coach.evaluate(() => window.__access)).toEqual([{ email: "student@nu-district.org", role: "member", team: "3A" }, { email: "lee@nu-district.org", role: "coach", team: "" }]);
+  expect(await coach.evaluate(() => window.__access)).toEqual([{ name: "Sam Student", email: "student@nu-district.org", role: "member", team: "3A" }, { name: "Coach Lee", email: "lee@nu-district.org", role: "coach", team: "" }]);
 
   await coach.click('[aria-label="Remove student@nu-district.org"]');
   await expect(coach.locator("#access-rows tr")).toHaveCount(2);

@@ -9,7 +9,8 @@
     let base = null;
     let conflicted = false;
     let saving = 0;
-    let access = { canEdit: false, role: "viewer", team: "", email: "", domain: "" };
+    let previewing = false;
+    let access = { canEdit: false, role: "viewer", team: "", email: "", domain: "", isOwner: false };
     // Waits before a retry, or until the browser reports it is back online.
     const pause = ms => new Promise(resolve => {
       const done = () => { clearTimeout(timer); root.removeEventListener?.("online", done); resolve(); };
@@ -24,11 +25,12 @@
     root.EventStorage = {
       shared: true,
       get conflicted() { return conflicted; },
+      get previewing() { return previewing; },
       get readOnly() { return !access.canEdit; },
       get access() { return { ...access }; },
       // True when another operator has saved since this page loaded or last saved.
       async hasNewer() {
-        if (conflicted || revision === undefined || saving) return false;
+        if (previewing || conflicted || revision === undefined || saving) return false;
         const response = JSON.parse(await call("eventRevisionJson"));
         if (!response.ok || saving || revision === undefined) return false;
         return response.revision > revision;
@@ -38,11 +40,25 @@
         const response = JSON.parse(await call("loadEventJson"));
         if (!response.ok) throw new Error(response.message);
         const role = ["coach", "member"].includes(response.access?.role) ? response.access.role : response.access?.canEdit && response.access?.role === undefined ? "coach" : "viewer";
-        access = { canEdit: role !== "viewer", role, team: String(response.access?.team || ""), email: String(response.access?.email || ""), domain: String(response.access?.domain || "") };
+        access = { canEdit: role !== "viewer", role, team: String(response.access?.team || ""), email: String(response.access?.email || ""), domain: String(response.access?.domain || ""), isOwner: response.access?.isOwner === true };
         revision = response.revision;
         base = response.event === null ? null : structuredClone(response.event);
         conflicted = false;
+        previewing = false;
         return response.event === null ? undefined : response.event;
+      },
+      async previewMember(team) {
+        await queue;
+        if (previewing || !access.isOwner) throw new Error("App owner access required to preview the student view.");
+        const response = JSON.parse(await call("previewMemberJson", String(team)));
+        if (!response.ok) throw new Error(response.message);
+        if (!response.previewing || response.access?.role !== "member" || response.access?.team !== String(team)) throw new Error("Invalid student preview response.");
+        access = { canEdit: true, role: "member", team: String(response.access.team), email: String(response.access.email || ""), domain: String(response.access.domain || "") };
+        revision = response.revision;
+        base = structuredClone(response.event);
+        conflicted = false;
+        previewing = true;
+        return response.event;
       },
       // Milliseconds between attempts when a save cannot reach the server; the last delay repeats until retryLimit.
       retryDelays: [2000, 4000, 8000, 15000, 30000],
@@ -50,6 +66,15 @@
       onretry: null,
       save(event) {
         const snapshot = structuredClone(event);
+        if (previewing) {
+          saving += 1;
+          const operation = queue.then(() => {
+            if (!previewing) throw new Error("Student preview ended before the change was applied.");
+            base = snapshot;
+          }).finally(() => { saving -= 1; });
+          queue = operation.catch(() => {});
+          return operation;
+        }
         const requestId = root.ScoreHistory.newId();
         saving += 1;
         const operation = queue.then(async () => {
@@ -91,11 +116,13 @@
       },
       // Coach-only: the app's access list (stored on the Access sheet of the shared spreadsheet).
       async loadAccess() {
+        if (previewing) throw new Error("Exit the student preview before managing access.");
         const response = JSON.parse(await call("loadAccessJson"));
         if (!response.ok) throw new Error(response.message);
         return response;
       },
       async saveAccess(entries) {
+        if (previewing) throw new Error("Exit the student preview before managing access.");
         const response = JSON.parse(await call("saveAccessJson", JSON.stringify({ entries })));
         if (!response.ok) throw new Error(response.message);
         return response;

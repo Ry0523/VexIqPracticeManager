@@ -10,6 +10,7 @@ const data = Object.fromEntries(names.map(name => [name, fs.readFileSync(path.jo
 function timer(options = {}) {
   const scheduled = [], errors = [], gains = [];
   const sound = { checked: true, addEventListener(type, handler) { this.change = handler; } };
+  const countdown = { checked: true };
   let performanceTime = 5000;
   const audio = {
     state: "running", currentTime: 5, baseLatency: 0.02,
@@ -21,7 +22,7 @@ function timer(options = {}) {
       return { duration: length / rate, getChannelData: () => samples, length, sampleRate: rate };
     },
     createBufferSource() {
-      const source = { connect() {}, disconnect() {}, stopped: false, stop() { this.stopped = true; }, start(time, offset, duration) { this.time = time; this.duration = duration; scheduled.push(this); } };
+      const source = { connect() {}, disconnect() {}, stopped: false, stop() { this.stopped = true; }, start(time, offset, duration) { this.time = time; this.offset = offset; this.duration = duration; scheduled.push(this); } };
       return source;
     }
   };
@@ -30,24 +31,43 @@ function timer(options = {}) {
     atob: value => Buffer.from(value, "base64").toString("binary"),
     setTimeout: options.setTimeout || setTimeout, clearTimeout,
     performance: { now: () => performanceTime },
-    document: { getElementById: () => sound },
+    document: { getElementById: id => id === "timer-countdown" ? countdown : sound },
     timerAudioError: error => errors.push(error),
     MatchCore: require("./core.js")
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, "timer-audio.js"), "utf8"), context);
-  return { api: context.TimerAudio, scheduled, errors, sound, gains, audio, advance(seconds) { audio.currentTime += seconds; performanceTime += seconds * 1000; } };
+  return { api: context.TimerAudio, scheduled, errors, sound, countdown, gains, audio, advance(seconds) { audio.currentTime += seconds; performanceTime += seconds * 1000; } };
 }
 
 test("all cues are scheduled before any visual timer ticks, with an exact full minute", async () => {
   const { api, scheduled } = timer();
   const end = await api.start(60000, true, true);
   assert.equal(scheduled.length, 6);
-  const expected = [5.08, 5.83, 6.58, 32.22, 42.22, 67.22];
+  const expected = [5.08, 5.83, 6.58, 32.464, 42.464, 67.464];
   scheduled.forEach((source, index) => assert.ok(Math.abs(source.time - expected[index]) < 1e-9));
   assert.equal(end, scheduled[5].time * 1000);
-  // The final beat and start sound play as one clip; the start sound begins 0.64 s in, exactly when the clock shows 1:00.
-  assert.ok(Math.abs(scheduled[5].time - (scheduled[2].time + 0.64) - 60) < 1e-9);
-  assert.equal(scheduled[2].duration, scheduled[2].buffer.duration);
+  // The countdown-1 effect ends at the start note, 0.884 s after the final cue begins.
+  assert.ok(Math.abs(scheduled[5].time - (scheduled[2].time + 0.884) - 60) < 1e-9);
+  assert.equal(scheduled[2].duration, undefined);
+});
+
+test("disabling the countdown starts the run immediately without countdown cues", async () => {
+  const { api, countdown, scheduled } = timer();
+  countdown.checked = false;
+  const end = await api.start(60000, true, true);
+  assert.equal(scheduled.length, 4);
+  assert.equal(scheduled[0].time, 5.08);
+  assert.equal(scheduled[0].duration, undefined, "the full start cue should play to its natural end");
+  const startBuffer = scheduled[0].buffer.getChannelData(0);
+  const startBytes = fs.readFileSync(path.join(__dirname, "timer-start.wav"));
+  const startOffset = startBytes.indexOf("data") + 8;
+  assert.equal(scheduled[0].offset, 0, "the start cue must play from its first sample");
+  assert.equal(startBuffer.length, startBytes.readUInt32LE(startOffset - 4) / 2);
+  for (const index of [0, 100, 240, 1200]) {
+    const sample = startBytes.readInt16LE(startOffset + index * 2) / 32768;
+    assert.ok(Math.abs(startBuffer[index] - sample) < 1e-6);
+  }
+  assert.equal(end, 65080);
 });
 
 test("the final beat flows into the full, unclipped start sound without a seam", async () => {
@@ -61,8 +81,8 @@ test("the final beat flows into the full, unclipped start sound without a seam",
   const beat = samples("countdown-1"), start = samples("start");
   const joined = scheduled[2].buffer.getChannelData(0);
   assert.equal(joined.length, beat.length + start.length);
-  assert.equal(beat.length / 24000, 0.64);
-  assert.ok(start.length / 24000 > 1.2);
+  assert.equal(beat.length, 7079);
+  assert.equal(start.length, 37561);
   for (const index of [-200, -1, 0, 1, 200]) {
     const expected = index < 0 ? beat.at(index) : start[index];
     assert.ok(Math.abs(joined[beat.length + index] - expected) < 1e-6);
@@ -73,9 +93,9 @@ test("the final beat flows into the full, unclipped start sound without a seam",
 
 test("the countdown shows 3, 2, 1 in step with the recorded beats", () => {
   const { api } = timer();
-  const shown = [2140, 1391, 1390, 641, 640, 1].map(api.countdownNumber);
+  const shown = [2384, 1635, 1634, 885, 884, 1].map(api.countdownNumber);
   assert.deepEqual([...shown], [3, 3, 2, 2, 1, 1]);
-  assert.equal(api.COUNTDOWN_MS, 2140);
+  assert.equal(api.COUNTDOWN_MS, 2384);
 });
 
 test("display clock accounts for audio output latency and ignores wall-clock adjustments", async () => {
@@ -83,9 +103,9 @@ test("display clock accounts for audio output latency and ignores wall-clock adj
   const end = await api.start(60000, true);
   assert.equal(api.now(), 4950);
   advance(2.27);
-  assert.ok(Math.abs(end - api.now() - 60000) < 1e-6);
+  assert.ok(Math.abs(end - api.now() - 60244) < 1e-6);
   advance(25);
-  assert.ok(Math.abs(end - api.now() - 35000) < 1e-6);
+  assert.ok(Math.abs(end - api.now() - 35244) < 1e-6);
 });
 
 test("fallback output clock subtracts known device latency", async () => {
@@ -182,7 +202,7 @@ test("slow audio startup does not consume any countdown or run time", async () =
   ready();
   const end = await pending;
   assert.ok(Math.abs(scheduled[0].time - 15.08) < 1e-9);
-  assert.ok(Math.abs(end - scheduled[0].time * 1000 - 62140) < 1e-9);
+  assert.ok(Math.abs(end - scheduled[0].time * 1000 - 62384) < 1e-9);
 });
 
 test("initially muted playback keeps the same timeline and can be unmuted", async () => {
@@ -198,11 +218,11 @@ test("initially muted playback keeps the same timeline and can be unmuted", asyn
 test("audio failure explicitly warns and preserves a monotonic visual timer", async () => {
   const { api, scheduled, errors, advance } = timer({ resume: async () => { throw new Error("Playback blocked"); } });
   const end = await api.start(60000, true);
-  assert.equal(end, 67140);
+  assert.equal(end, 67384);
   assert.equal(scheduled.length, 0);
   assert.equal(errors.length, 1);
   assert.ok(errors[0].includes("Playback blocked"));
-  advance(2.14);
+  advance(2.384);
   assert.equal(end - api.now(), 60000);
 });
 
@@ -211,7 +231,7 @@ test("blocked audio readiness times out explicitly instead of leaving controls s
     resume: () => new Promise(() => {}),
     setTimeout: callback => { queueMicrotask(callback); return undefined; }
   });
-  assert.equal(await api.start(60000, true), 67140);
+  assert.equal(await api.start(60000, true), 67384);
   assert.equal(api.isStarting(), false);
   assert.equal(scheduled.length, 0);
   assert.equal(errors.length, 1);

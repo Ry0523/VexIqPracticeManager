@@ -210,7 +210,7 @@ test("coaching guidance covers every notebook and interview criterion at every r
     assert.deepEqual(Object.keys(guidance[label]).sort(), model.criteria.map(item => item.id).sort());
     for (const { id } of model.criteria) {
       assert.equal(guidance[label][id].length, model.maximum - model.minimum + 1);
-      assert.ok(guidance[label][id].every(description => typeof description === "string" && description.trim().length > 20));
+      assert.ok(guidance[label][id].every(description => typeof description === "string" && description.trim().length > 20 || Array.isArray(description) && description.length > 0 && description.every(point => typeof point === "string" && point.trim().length > 0) || description && typeof description === "object" && typeof description.text === "string" && description.text.trim().length > 0 && Array.isArray(description.bullets) && description.bullets.length > 0 && description.bullets.every(point => typeof point === "string" && point.trim().length > 0)));
     }
   }
 });
@@ -300,6 +300,7 @@ test("combined ranking weights leader-relative skills/teamwork and absolute rubr
   const notebooks = Rubric.save([], team, input(4));
   const interviews = Interview.save([], team, interviewInput(2));
   const rows = Rubric.combinedRanking(records, teams, notebooks, interviews);
+  const scaledPoints = (score, leader) => 25 * Math.log1p(score) / Math.log1p(leader);
   assert.equal(rows[0].total, 100);
   assert.deepEqual([rows[0].skillsPoints, rows[0].teamworkPoints, rows[0].notebookPoints, rows[0].interviewPoints], [25, 25, 40, 10]);
   assert.deepEqual(rows[0].missing, []);
@@ -309,7 +310,7 @@ test("combined ranking weights leader-relative skills/teamwork and absolute rubr
   const updated = Rubric.combinedRanking(records, teams, notebooks, Interview.save(interviews, team, followUp));
   assert.equal(updated[0].interviewPoints, 10 / 12 * 10);
   assert.deepEqual(updated[0].missing, []);
-  assert.equal(rows[1].total, 37.5);
+  assert.ok(Math.abs(rows[1].total - (scaledPoints(10, 20) + 25)) < 1e-10);
   assert.ok(rows[1].missing.includes("No Autonomous result"));
   assert.equal(rows[2].total, 0);
   assert.equal(rows[2].rank, 3);
@@ -349,11 +350,11 @@ test("combined ranking can place rubric strength above the skills leader and fol
   const notebooks = Rubric.save([], other, input(4));
   let rows = Rubric.combinedRanking([first, second], teams, notebooks);
   assert.equal(rows[0].id, "2A");
-  assert.equal(rows[0].total, 52.5);
+  assert.ok(Math.abs(rows[0].total - (40 + 25 * Math.log1p(10) / Math.log1p(20))) < 1e-10);
   const corrected = History.practiceRecord([first, second], teams, { ...inputRun, goals: Core.goalsFromCounts([5, 0, 0, 0, 0]) }, first.runId);
   rows = Rubric.combinedRanking([first, second, corrected], teams, notebooks);
   assert.equal(rows[0].total, 65);
-  assert.equal(rows[1].skillsPoints, 12.5);
+  assert.ok(Math.abs(rows[1].skillsPoints - 25 * Math.log1p(5) / Math.log1p(10)) < 1e-10);
   const removed = History.removePractice([first, second, corrected], second.runId);
   rows = Rubric.combinedRanking([first, second, corrected, removed], teams, notebooks);
   assert.equal(rows[0].id, "2A");

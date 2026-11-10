@@ -6,7 +6,10 @@
   let flowWatch = null;
   let scoring = { goals: ACTIVE_GAME.emptyGoals() };
   let selected = null;
+  let practiceTeamTouched = false;
+  let teamContext = { role: globalThis.EventStorage.access?.role, team: globalThis.EventStorage.access?.team };
   let changed = false;
+  let baseline = null;
   let endAt = null;
   let remainingTime = MATCH_MS;
   let started = false;
@@ -21,27 +24,49 @@
     return saved?.kind === "skills" ? saved.value.status : "ok";
   };
   const mode = () => get("practice-mode").value;
+  const draftSnapshot = () => JSON.stringify({
+    fields: [...form.querySelectorAll("input,select,textarea")].map(field => [field.type === "checkbox" ? field.checked : field.value]),
+    goals: scoring.goals,
+    started,
+    ended,
+    runAt
+  });
+  function captureBaseline() {
+    baseline = draftSnapshot();
+    changed = false;
+  }
+  function syncChanged() {
+    changed = baseline !== null && draftSnapshot() !== baseline;
+  }
 
   function teamOptions() {
     const directory = new Map((record()?.teams || []).map(team => [team.id, team]));
     for (const team of state.teams) directory.set(team.id, team);
+    const access = globalThis.EventStorage.access;
+    if (teamContext.role !== access?.role || teamContext.team !== access?.team) {
+      teamContext = { role: access?.role, team: access?.team };
+      practiceTeamTouched = false;
+    }
+    const assignedTeam = access?.role === "member" ? access.team : "";
     for (const id of ["practice-team", "practice-partner"]) {
       const input = get(id);
       const previous = input.value;
       input.innerHTML = [...directory.values()].map(team => `<option value="${escapeText(team.id)}">${escapeText(team.id)} / ${escapeText(team.name)}</option>`).join("");
-      if (directory.has(previous)) input.value = previous;
+      if (id === "practice-team" && !practiceTeamTouched && !selected && directory.has(assignedTeam)) input.value = assignedTeam;
+      else if (directory.has(previous)) input.value = previous;
     }
     if (!selected && !changed && get("practice-partner").value === get("practice-team").value && directory.size > 1) get("practice-partner").selectedIndex = 1;
     return [...directory.values()];
   }
 
   function update() {
+    syncScreenWakeLock();
     const teamwork = mode() === "teamwork";
     get("practice-partner-field").hidden = !teamwork;
     for (const id of ["practice-opt-in-field", "practice-stop-field"]) get(id).hidden = teamwork;
     const stopAllowed = !teamwork && get("practice-opt-in").checked && skillsStatus() === "ok";
     if (!stopAllowed) get("practice-stop").value = 0;
-    get("practice-stop").disabled = !stopAllowed || endAt !== null;
+    get("practice-stop").disabled = !stopAllowed || endAt !== null || (started && !ended);
     get("practice-opt-in").disabled = started;
     for (const id of ["practice-mode", "practice-team", "practice-partner"]) get(id).disabled = endAt !== null || globalThis.TimerAudio.isStarting();
     const valid = updateCalculator(calculator, scoring, get("practice-score-total"), get("practice-bag-total"));
@@ -51,7 +76,7 @@
     get("save-practice").textContent = selected ? "Update practice run" : "Save practice run";
     get("practice-ranking-note").textContent = (selected ? record()?.runRole === "member" : isMember())
       ? "Student run - saved for practice history and analysis, not leaderboards."
-      : "Coach run - counts toward leaderboards.";
+      : "";
     get("remove-practice").hidden = !selected;
     get("remove-practice").disabled = saving;
     get("cancel-practice-edit").hidden = !selected;
@@ -59,15 +84,31 @@
     get("new-practice").disabled = get("new-practice-bottom").disabled = saving;
     const seconds = Math.ceil(Math.min(MATCH_MS, remainingTime) / 1000);
     get("practice-timer").textContent = clockText(remainingTime);
-    get("practice-timer-label").textContent = ended ? "PRACTICE RUN ENDED" : endAt !== null ? mode() !== "autonomous" && inSwitchWindow(seconds * 1000) ? "DRIVER SWITCH WINDOW" : "PRACTICE IN PROGRESS" : "READY FOR PRACTICE";
-    if (remainingTime > MATCH_MS) get("practice-timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(remainingTime - MATCH_MS)}`;
+    get("practice-timer-dial").style.setProperty("--timer-progress-angle", timerProgressAngle(remainingTime));
+    const preparing = globalThis.TimerAudio.isStarting() || (endAt !== null && remainingTime > MATCH_MS);
+    const controlState = ended ? "ended" : preparing ? "preparing" : endAt !== null ? "running" : started ? "paused" : "ready";
+    get("practice-timer-label").textContent = ended ? "PRACTICE RUN ENDED" : preparing ? "PREPARING TIMER" : started && endAt === null ? "PRACTICE RUN PAUSED" : endAt !== null ? mode() !== "autonomous" && inSwitchWindow(seconds * 1000) ? "DRIVER SWITCH WINDOW" : "PRACTICE IN PROGRESS" : "READY FOR PRACTICE";
+    if (remainingTime > MATCH_MS && get("timer-countdown").checked) get("practice-timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(remainingTime - MATCH_MS)}`;
     get("practice-timer-stage").classList.toggle("ended", ended);
-    get("start-practice").textContent = endAt !== null ? "End run" : "Start run";
-    if (globalThis.TimerAudio.isStarting()) get("practice-timer-label").textContent = "PREPARING TIMER";
-    get("start-practice").disabled = ended || Boolean(selected) || !get("practice-team").value || saving || globalThis.TimerAudio.isStarting() || (teamwork && (!get("practice-partner").value || get("practice-partner").value === get("practice-team").value));
+    const controls = get("practice-run-controls");
+    controls.dataset.state = controlState;
+    const reset = get("reset-practice-timer");
+    reset.hidden = !["paused", "ended"].includes(controlState);
+    reset.setAttribute("aria-label", controlState === "paused" ? "Reset paused run" : "Reset timer");
+    reset.title = controlState === "paused" ? "Reset paused run" : "Reset timer";
+    reset.querySelector(".run-cancel-icon").toggleAttribute("hidden", controlState !== "paused");
+    reset.querySelector(".run-reset-icon").toggleAttribute("hidden", controlState !== "ended");
+    get("start-practice").hidden = !["ready", "paused"].includes(controlState);
+    get("start-practice").setAttribute("aria-label", controlState === "paused" ? "Resume run" : "Start run");
+    get("start-practice").title = controlState === "paused" ? "Resume run" : "Start run";
+    get("start-practice").disabled = !["ready", "paused"].includes(controlState) || Boolean(selected) || !get("practice-team").value || saving || globalThis.TimerAudio.isStarting() || (teamwork && (!get("practice-partner").value || get("practice-partner").value === get("practice-team").value));
+    get("pause-practice").hidden = controlState !== "running";
+    get("stop-practice").hidden = !["running", "preparing"].includes(controlState);
+    get("stop-practice").disabled = globalThis.TimerAudio.isStarting();
     get("reset-practice-timer").disabled = !canResetClock();
     const teams = teamwork ? `${get("practice-team").value} + ${get("practice-partner").value}` : get("practice-team").value;
     get("practice-flow-label").textContent = `${selected ? "Editing practice run" : "Practice run"} \u00b7 ${modeName(mode())}${teams ? ` \u00b7 ${teams}` : ""}`;
+    syncChanged();
     get("practice-flow-next").textContent = changed ? "Post & next run \u2192" : "Next run \u2192";
     get("practice-flow-next").disabled = saving || (changed && get("save-practice").disabled);
     get("new-practice-bottom").textContent = flowOpen() ? "Discard & next run" : "Next run";
@@ -111,11 +152,13 @@
     get("practice-stop").value = 0;
     teamOptions();
     renderScoringInputs(calculator, scoring, "practice-goal");
+    captureBaseline();
     update();
   }
 
   function renderPractice() {
     teamOptions();
+    if (!selected && !changed && !started) captureBaseline();
     renderRuns();
     update();
   }
@@ -129,7 +172,7 @@
     const shown = teamOnly ? records().filter(item => item.teams.some(entry => entry.id === team)) : records();
     get("practice-runs").innerHTML = shown.slice(-100).reverse().map(item => {
       const value = item.kind === "teamwork" ? item.value.result : item.value;
-      return `<tr><td>${escapeText(History.localDateTime(item.occurredAt))}</td><td>${modeName(item.kind === "teamwork" ? "teamwork" : item.value.mode)}<small>${item.runRole === "member" ? "Student run (not ranked)" : "Coach run"}</small></td><td>${item.teams.map(team => escapeText(team.id)).join(" + ")}</td><td>${Core.score(value.counts)}</td><td>${escapeText(item.notes)}</td>${coach ? `<td><button type="button" data-edit-practice="${escapeText(item.runId)}">Edit</button></td>` : ""}</tr>`;
+      return `<tr><td>${escapeText(History.localDateTime(item.occurredAt))}</td><td>${modeName(item.kind === "teamwork" ? "teamwork" : item.value.mode)}<small>${item.runRole === "member" ? "Student run (not ranked)" : "Coach run"}</small></td><td>${item.teams.map(team => escapeText(team.id)).join(" + ")}</td><td>${Core.score(value.counts)}</td><td>${escapeText(item.notes)}</td>${coach ? `<td><button type="button" data-edit-practice="${escapeText(item.runId)}">Edit</button>${item.runRole === "member" ? `<button type="button" data-promote-practice="${escapeText(item.runId)}" title="Include this run in coach leaderboards">Promote</button>` : ""}</td>` : ""}</tr>`;
     }).join("") || `<tr><td colspan="${coach ? 6 : 5}">${teamOnly ? `No practice runs saved for team ${escapeText(team)}.` : "No practice runs saved."}</td></tr>`;
   }
 
@@ -138,15 +181,33 @@
     return !changed || (await ask("Discard the unposted practice changes?", "Discard changes", true));
   }
 
+  async function promotePracticeRun(runId) {
+    if (saving || accessRole() !== "coach" || !(await canLeave())) return;
+    if (!(await ask("Promote this student run to coach leaderboards? The original student entry will remain in score history.", "Promote run"))) return;
+    if (changed || selected) reset();
+    try {
+      const entry = History.promotePractice(state.history, runId);
+      state = { ...state, history: [...state.history, entry] };
+      saving = true;
+      get("practice-form").inert = true;
+      const pending = persist();
+      render();
+      if (await pending) notify("Practice run promoted to the coach leaderboards.");
+    } catch (error) { notify(`Practice promotion failed: ${error.message}`); }
+    finally { saving = false; get("practice-form").inert = false; update(); }
+  }
+
   for (const id of ["new-practice", "new-practice-bottom"]) get(id).addEventListener("click", async () => { if (await canLeave()) reset(); });
   get("cancel-practice-edit").addEventListener("click", async () => {
     if (saving || (changed && !(await ask("Discard your changes to this practice run?", "Discard changes", true)))) return;
     reset();
     renderRuns();
   });
-  get("practice-team").addEventListener("change", renderRuns);
+  get("practice-team").addEventListener("change", () => { practiceTeamTouched = true; renderRuns(); update(); });
   get("practice-filter").addEventListener("change", renderRuns);
   get("practice-runs").addEventListener("click", async event => {
+    const promote = event.target.closest("[data-promote-practice]");
+    if (promote) { await promotePracticeRun(promote.dataset.promotePractice); return; }
     const button = event.target.closest("[data-edit-practice]");
     if (!button || saving || accessRole() !== "coach" || !(await canLeave())) return;
     selected = button.dataset.editPractice;
@@ -167,17 +228,18 @@
     scoring = { goals: structuredClone(value.goals || Core.goalsFromCounts(value.counts)) };
     changed = false; endAt = null; remainingTime = MATCH_MS; started = false; ended = false;
     renderScoringInputs(calculator, scoring, "practice-goal");
+    captureBaseline();
     renderRuns();
     update();
     get("practice-mode").focus();
   });
-  get("practice-form").addEventListener("input", () => { changed = true; update(); });
+  get("practice-form").addEventListener("input", update);
   calculator.addEventListener("click", event => {
     const button = event.target.closest("[data-step]");
     if (!button || button.disabled) return;
     const input = get(button.dataset.counter);
     input.value = Number(input.value) + Number(button.dataset.step);
-    changed = true; update();
+    update();
   });
   async function save(message = "Practice run saved. Choose Next run to record another attempt.") {
     if (saving || !idle()) return false;
@@ -198,7 +260,7 @@
       const entry = History.practiceRecord(state.history, teamOptions(), input, selected);
       if (selected && !(await ask("Replace this practice run's score? The earlier version stays in history.", "Replace score"))) return false;
       state = { ...state, history: [...state.history, entry] };
-      selected = entry.runId; changed = false; saving = true;
+      selected = entry.runId; captureBaseline(); saving = true;
       get("practice-form").inert = true;
       const pending = persist();
       render();
@@ -234,37 +296,58 @@
   });
   get("start-practice").addEventListener("click", async () => {
     if (globalThis.TimerAudio.isStarting()) { notify("Wait for the timer audio to become ready."); return; }
-    if (endAt !== null) {
-      if (endAt - globalThis.TimerAudio.now() > MATCH_MS) {
-        globalThis.TimerAudio.stop();
-        endAt = null; remainingTime = MATCH_MS; started = false; ended = false;
-        update(); return;
-      }
-      remainingTime = Math.max(0, endAt - globalThis.TimerAudio.now());
-      endAt = null; ended = true;
-      if (mode() !== "teamwork" && get("practice-opt-in").checked) get("practice-stop").value = Math.ceil(remainingTime / 1000);
-      changed = true; globalThis.TimerAudio.finish();
-    } else {
-      if (!idle() || ended || selected || get("start-practice").disabled) return;
-      started = true; changed = true;
-      runAt = new Date().toISOString();
-      const ready = globalThis.TimerAudio.start(remainingTime, true, mode() !== "autonomous");
-      update();
-      endAt = await ready;
-      if (endAt !== null) remainingTime = Math.max(0, endAt - globalThis.TimerAudio.now());
+    if (endAt !== null || !idle() || ended || selected || get("start-practice").disabled) return;
+    const fresh = !started;
+    started = true;
+    if (fresh) runAt = new Date().toISOString();
+    const ready = globalThis.TimerAudio.start(remainingTime, fresh, mode() !== "autonomous");
+    update();
+    endAt = await ready;
+    if (endAt !== null) remainingTime = Math.max(0, endAt - globalThis.TimerAudio.now());
+    update();
+  });
+  get("pause-practice").addEventListener("click", () => {
+    if (endAt === null || globalThis.TimerAudio.isStarting() || remainingTime > MATCH_MS) return;
+    remainingTime = Math.max(0, endAt - globalThis.TimerAudio.now());
+    endAt = null;
+    if (remainingTime === 0) {
+      ended = true;
+      get("practice-stop").value = 0;
+      globalThis.TimerAudio.finish();
+    } else globalThis.TimerAudio.stop();
+    update();
+  });
+  get("stop-practice").addEventListener("click", () => {
+    if (globalThis.TimerAudio.isStarting()) {
+      globalThis.TimerAudio.stop();
+      endAt = null; remainingTime = MATCH_MS; started = false; ended = false; runAt = null;
+      get("practice-stop").value = 0;
+      update(); return;
     }
+    if (endAt === null) return;
+    const remaining = Math.max(0, endAt - globalThis.TimerAudio.now());
+    if (remaining > MATCH_MS) {
+      globalThis.TimerAudio.stop();
+      endAt = null; remainingTime = MATCH_MS; started = false; ended = false; runAt = null;
+      get("practice-stop").value = 0;
+      update(); return;
+    }
+    remainingTime = remaining;
+    endAt = null; ended = true;
+    if (mode() !== "teamwork" && get("practice-opt-in").checked) get("practice-stop").value = Math.ceil(remainingTime / 1000);
+    globalThis.TimerAudio.finish();
     update();
   });
   get("reset-practice-timer").addEventListener("click", () => {
     if (!canResetClock()) return;
-    endAt = null; remainingTime = MATCH_MS; started = false; ended = false;
+    endAt = null; remainingTime = MATCH_MS; started = false; ended = false; runAt = null;
     get("practice-stop").value = 0;
-    changed = true; update();
+    update();
   });
   setInterval(() => {
     if (endAt === null) return;
     remainingTime = Math.max(0, endAt - globalThis.TimerAudio.now());
-    if (remainingTime === 0) { endAt = null; ended = true; get("practice-stop").value = 0; changed = true; }
+    if (remainingTime === 0) { endAt = null; ended = true; get("practice-stop").value = 0; }
     update();
   }, 25);
   globalThis.PracticeUI = { render: renderPractice, reset, exitFlow, isDirty: () => changed, isRunning: () => endAt !== null };

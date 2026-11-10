@@ -106,6 +106,38 @@ function coachingFixture() {
   return EventModel.validate(event);
 }
 
+test("coach student preview returns member-redacted live data without changing the event", () => {
+  const { context: api, grant, signIn } = server();
+  const event = coachingFixture();
+  const History = require("./history.js");
+  const secondTeam = { id: "2A", name: "Two", draw: 1 };
+  event.teams.push(secondTeam);
+  event.rubrics.push({ ...event.rubrics[0], id: History.newId(), team: secondTeam });
+  event.interviews.push({ ...event.interviews[0], id: History.newId(), team: secondTeam });
+  api.saveEvent({ revision: 0, requestId: "setup-preview", event });
+  const revision = api.loadEvent().revision;
+
+  const preview = JSON.parse(api.previewMemberJson("1A"));
+  assert.equal(preview.access.role, "member");
+  assert.equal(preview.access.team, "1A");
+  assert.equal(preview.previewing, true);
+  assert.equal(preview.event.rubrics[0].overallNotes, "Private feedback");
+  assert.equal(preview.event.rubrics[1].overallNotes, "");
+  assert.equal(preview.event.interviews[0].overallNotes, "Private feedback");
+  assert.equal(preview.event.interviews[1].overallNotes, "");
+  assert.equal(api.loadEvent().revision, revision, "preview does not save to the shared event");
+  assert.throws(() => api.previewMemberJson("3A"), /Choose a team on the active roster/);
+
+  grant([{ email: "listed-coach@nu-district.org", role: "coach" }]);
+  signIn("listed-coach@nu-district.org");
+  assert.equal(api.loadEvent().access.isOwner, false);
+  assert.throws(() => api.previewMemberJson("1A"), /App owner access required/);
+
+  grant([{ email: "student@nu-district.org", role: "member", team: "1A" }]);
+  signIn("student@nu-district.org");
+  assert.throws(() => api.previewMemberJson("1A"), /App owner access required/);
+});
+
 test("members manage only their own student reviews on both shared save protocols, with private feedback preserved", () => {
   const Rubric = require("./rubric.js");
   const Changes = require("./changes.js");
@@ -183,7 +215,7 @@ test("only coaches and listed members can save; everyone else gets a read-only c
   const event = coachingFixture();
   assert.equal(api.saveEvent({ revision: 0, requestId: "coach", event }).revision, 1);
   const editor = api.loadEvent();
-  assert.deepEqual({ ...editor.access }, { canEdit: true, role: "coach", team: "", email: "coach@nu-district.org", domain: "nu-district.org" });
+  assert.deepEqual({ ...editor.access }, { canEdit: true, role: "coach", team: "", email: "coach@nu-district.org", domain: "nu-district.org", isOwner: true });
   assert.equal(editor.event.rubrics[0].overallNotes, "Private feedback");
 
   for (const visitor of ["parent@gmail.com", "", "someone@not-nu-district.org", "nu-district.org@evil.com", "unlisted@nu-district.org"]) {
@@ -220,27 +252,30 @@ function memberFixture() {
 test("coaches manage the access list on the Access sheet; invalid or unauthorized changes are refused", () => {
   const { context: api, signIn, sheets, isLocked } = server();
   assert.deepEqual(JSON.parse(api.loadAccessJson()), { ok: true, owner: "coach@nu-district.org", domain: "nu-district.org", entries: [] });
-  const saved = JSON.parse(api.saveAccessJson(JSON.stringify({ entries: [{ email: " Kim@NU-District.org ", role: "Coach", team: "9Z" }, { email: "student@nu-district.org", role: "member", team: "1a" }] })));
-  assert.deepEqual(saved.entries, [{ email: "kim@nu-district.org", role: "coach", team: "" }, { email: "student@nu-district.org", role: "member", team: "1A" }]);
+  const saved = JSON.parse(api.saveAccessJson(JSON.stringify({ entries: [{ name: "Kim Coach", email: " Kim@NU-District.org ", role: "Coach", team: "9Z" }, { name: "Sam Student", email: "student@nu-district.org", role: "member", team: "1a" }] })));
+  assert.deepEqual(saved.entries, [{ name: "Kim Coach", email: "kim@nu-district.org", role: "coach", team: "" }, { name: "Sam Student", email: "student@nu-district.org", role: "member", team: "1A" }]);
   const sheet = sheets.get("Access");
   assert.deepEqual(sheet.getRange(1, 1, 1, 3).getValues()[0], ["Email", "Role", "Team"]);
   assert.equal(sheet.getRange(3, 4).getValue(), "coach@nu-district.org");
+  assert.equal(sheet.getRange(2, 6).getValue(), "Kim Coach");
   for (const [entries, pattern] of [
     [[{ email: "parent@gmail.com", role: "member", team: "1A" }], /@nu-district\.org email/],
     [[{ email: "a@nu-district.org", role: "member", team: "" }], /team number/],
     [[{ email: "a@nu-district.org", role: "admin", team: "" }], /role/],
     [[{ email: "a@nu-district.org", role: "coach" }, { email: "A@nu-district.org", role: "member", team: "1A" }], /more than once/],
-    [[{ email: "coach@nu-district.org", role: "member", team: "1A" }], /owns the app/]
+    [[{ email: "coach@nu-district.org", role: "member", team: "1A" }], /owns the app/],
+    [[{ name: "N".repeat(81), email: "a@nu-district.org", role: "coach" }], /@nu-district\.org email/]
   ]) assert.throws(() => api.saveAccessJson(JSON.stringify({ entries })), pattern);
   assert.equal(JSON.parse(api.loadAccessJson()).entries.length, 2);
   // Rows typed by hand in the sheet are read case-insensitively; invalid rows are ignored rather than blocking access.
   sheet.getRange(4, 1, 1, 3).setValues([["junk", "coach", ""]]);
   sheet.getRange(5, 1, 1, 3).setValues([["Helper@nu-district.org", "MEMBER", "2a"]]);
   signIn("helper@nu-district.org");
-  assert.deepEqual({ ...api.loadEvent().access }, { canEdit: true, role: "member", team: "2A", email: "helper@nu-district.org", domain: "nu-district.org" });
+  assert.deepEqual({ ...api.loadEvent().access }, { canEdit: true, role: "member", team: "2A", email: "helper@nu-district.org", domain: "nu-district.org", isOwner: false });
   assert.throws(() => api.loadAccessJson(), /Only coaches/);
   assert.throws(() => api.saveAccessJson(JSON.stringify({ entries: [] })), /Only coaches/);
   signIn("kim@nu-district.org");
+  assert.equal(JSON.parse(api.loadAccessJson()).entries.find(entry => entry.email === "helper@nu-district.org").name, "");
   assert.equal(JSON.parse(api.saveAccessJson(JSON.stringify({ entries: [] }))).entries.length, 0);
   assert.equal(sheet.getLastRow(), 1);
   signIn("helper@nu-district.org");
@@ -460,13 +495,13 @@ test("shared clients report team member access and the coach-only access list AP
   const coach = client(api);
   await coach.load();
   assert.equal(coach.access.role, "coach");
-  assert.equal((await coach.saveAccess([{ email: "student@nu-district.org", role: "member", team: "2A" }])).entries.length, 1);
+  assert.equal((await coach.saveAccess([{ name: "Taylor Student", email: "student@nu-district.org", role: "member", team: "2A" }])).entries.length, 1);
   assert.equal((await coach.loadAccess()).entries[0].team, "2A");
   signIn("student@nu-district.org");
   const member = client(api);
   const event = await member.load();
   assert.equal(member.readOnly, false);
-  assert.deepEqual({ ...member.access }, { canEdit: true, role: "member", team: "2A", email: "student@nu-district.org", domain: "nu-district.org" });
+  assert.deepEqual({ ...member.access }, { canEdit: true, role: "member", team: "2A", email: "student@nu-district.org", domain: "nu-district.org", isOwner: false });
   await member.save({ ...event, selected: 1 });
   await assert.rejects(member.loadAccess(), /Only coaches/);
   grant([]);
@@ -736,15 +771,35 @@ test("student run eligibility is enforced by both shared save protocols", () => 
     assert.equal(save(run).ok, true);
     assert.equal(History.skillsRanking(api.loadEvent().event.history)[0].driver, 1);
     assert.equal(History.teamAnalysis(api.loadEvent().event.history, "1A").modes.driver.best, 10);
+    const tryPromotionAsMember = () => {
+      const latest = api.loadEvent();
+      const promotion = History.promotePractice(latest.event.history, run.runId);
+      const event = { ...latest.event, history: [...latest.event.history, promotion] };
+      return protocol === "event"
+        ? api.saveEvent({ revision: latest.revision, requestId: History.newId(), event })
+        : api.saveChanges({ requestId: History.newId(), changes: Changes.diff(latest.event, event) });
+    };
+    assert.throws(tryPromotionAsMember, /Coach access required to score matches or skills, or to edit or remove a practice run/);
     signIn("coach@nu-district.org");
     const current = api.loadEvent();
-    const coachRun = History.practiceRecord(current.event.history, current.event.teams, input);
+    const coachRun = History.practiceRecord(current.event.history, current.event.teams, { ...input, goals: Core.goalsFromCounts([2, 0, 0, 0, 0]) });
     const coachEvent = { ...current.event, history: [...current.event.history, coachRun] };
     const result = protocol === "event"
       ? api.saveEvent({ revision: current.revision, requestId: "coach-run", event: coachEvent })
       : api.saveChanges({ requestId: "coach-run", changes: Changes.diff(current.event, coachEvent) });
     assert.equal(result.ok, true);
-    assert.equal(History.skillsRanking(api.loadEvent().event.history)[0].driver, 10);
+    assert.equal(History.skillsRanking(api.loadEvent().event.history)[0].driver, 2);
+    const beforePromotion = api.loadEvent();
+    const promotion = History.promotePractice(beforePromotion.event.history, run.runId);
+    const promotedEvent = { ...beforePromotion.event, history: [...beforePromotion.event.history, promotion] };
+    const promoted = protocol === "event"
+      ? api.saveEvent({ revision: beforePromotion.revision, requestId: "coach-promotion", event: promotedEvent })
+      : api.saveChanges({ requestId: "coach-promotion", changes: Changes.diff(beforePromotion.event, promotedEvent) });
+    assert.equal(promoted.ok, true);
+    const promotedHistory = api.loadEvent().event.history;
+    assert.equal(promotedHistory.find(record => record.id === run.id).runRole, "member", "the original student entry remains unchanged");
+    assert.equal(History.resolve(promotedHistory).find(record => record.runId === run.runId).runRole, "coach");
+    assert.equal(History.skillsRanking(promotedHistory)[0].driver, 10);
   }
 });
 

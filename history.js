@@ -32,7 +32,7 @@
     if (!Array.isArray(records)) throw new Error("Invalid score history.");
     const ids = new Set();
     for (const record of records) {
-      if (!record || typeof record.id !== "string" || !record.id || ids.has(record.id) || typeof record.sessionId !== "string" || !record.sessionId || typeof record.eventName !== "string" || record.eventName.length > 80 || typeof record.skillsOnly !== "boolean" || !["posted", "updated", "removed", "voided", "migrated"].includes(record.action) || (record.recordedAt !== null && (typeof record.recordedAt !== "string" || !Number.isFinite(Date.parse(record.recordedAt))))) throw new Error("Invalid score history record.");
+      if (!record || typeof record.id !== "string" || !record.id || ids.has(record.id) || typeof record.sessionId !== "string" || !record.sessionId || typeof record.eventName !== "string" || record.eventName.length > 80 || typeof record.skillsOnly !== "boolean" || !["posted", "updated", "promoted", "removed", "voided", "migrated"].includes(record.action) || (record.recordedAt !== null && (typeof record.recordedAt !== "string" || !Number.isFinite(Date.parse(record.recordedAt))))) throw new Error("Invalid score history record.");
       ids.add(record.id);
       if (record.game !== undefined && !Game.validId(record.game)) throw new Error(`Score history uses unknown game "${record.game}". Add its definition to games/ before loading this data.`);
       const game = gameOf(record);
@@ -209,6 +209,17 @@
     const previous = resolve(records).find(record => record.source === "practice" && record.runId === runId);
     if (!previous) throw new Error("This practice run no longer exists. Reload the latest data.");
     return { ...copy(previous), id: newId(), recordedAt: new Date().toISOString(), action: "removed" };
+  }
+
+  function promotePractice(records, runId) {
+    const previous = resolve(records).find(record => record.source === "practice" && record.runId === runId);
+    if (!previous) throw new Error("This practice run no longer exists. Reload the latest data.");
+    if (previous.runRole !== "member") throw new Error("Only student practice runs can be promoted.");
+    const previousTime = Date.parse(previous.recordedAt);
+    const recordedAt = new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : Date.now())).toISOString();
+    const promoted = { ...copy(previous), id: newId(), recordedAt, action: "promoted", runRole: "coach" };
+    validate([promoted]);
+    return promoted;
   }
 
   function statistics(values) {
@@ -419,7 +430,7 @@
     return [headers, ...rows].map(row => row.map(cell).join(",")).join("\r\n");
   }
 
-  const api = { gameOf, forGame: Game.forGame, newId, teamDirectory, capture, validate, initialize, merge, csv, skillKey, resultKey, resolve, statistics, analyze, skillsRanking, teamworkRanking, teamAnalysis, filterSource, practiceRecord, removePractice, localDate, localDateTime, validateRobots, robotVersions, currentRobot, robotAttribution, currentRobotOnly, robotComparison, renameRobots, abandonRobot, restoreRobot };
+  const api = { gameOf, forGame: Game.forGame, newId, teamDirectory, capture, validate, initialize, merge, csv, skillKey, resultKey, resolve, statistics, analyze, skillsRanking, teamworkRanking, teamAnalysis, filterSource, practiceRecord, promotePractice, removePractice, localDate, localDateTime, validateRobots, robotVersions, currentRobot, robotAttribution, currentRobotOnly, robotComparison, renameRobots, abandonRobot, restoreRobot };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ScoreHistory = api;
 })(globalThis);

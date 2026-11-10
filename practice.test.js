@@ -28,6 +28,16 @@ test("student quick runs stay in history and analysis but never affect any leade
     assert.equal(History.filterSource(history, "practice").length, 2);
     const edited = History.practiceRecord(history, teams, input({ ...options, runRole: "coach" }), student.runId);
     assert.equal(edited.runRole, "member", "a coach correction does not promote a student run");
+    const promoted = History.promotePractice(history, student.runId);
+    const promotedHistory = [...history, promoted];
+    assert.equal(promoted.action, "promoted");
+    assert.equal(promoted.runRole, "coach");
+    assert.equal(promoted.runId, student.runId);
+    assert.notEqual(promoted.id, student.id);
+    assert.equal(History.resolve(promotedHistory).find(record => record.runId === student.runId).id, promoted.id);
+    assert.equal(history[1].runRole, "member", "promotion preserves the original student record");
+    assert.notDeepEqual(Rubric.combinedRanking(promotedHistory, teams), Rubric.combinedRanking([coach], teams));
+    assert.throws(() => History.promotePractice(promotedHistory, student.runId), /Only student practice runs/);
     const removed = History.removePractice([...history, edited], student.runId);
     assert.equal(removed.runRole, "member");
     assert.deepEqual(History.merge([], JSON.parse(JSON.stringify(history))), history);
