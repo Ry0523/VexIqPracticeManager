@@ -1,3 +1,4 @@
+/** Notebook and interview review schemas, validation, history, and score projection. */
 (function (root) {
   "use strict";
   const Game = typeof module !== "undefined" && module.exports ? require("./game.js") : root.VexGame;
@@ -26,8 +27,10 @@
   const text = (value, limit) => typeof value === "string" && value.length <= limit;
   const date = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
+  /** @param {import("./types").RubricCriterion[]} criteria Ordered criteria. @param {number} minimum Lowest allowed score. @param {number} maximum Highest allowed score. @param {string} label Kind used in errors. @returns {object} Validation, history, projection, and export functions for one rubric. */
   function createRubric(criteria, minimum, maximum, label) {
   const version = "v2.0";
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Review history. @returns {import("./types").ReviewEvaluation[]} Validated records with supported legacy defaults filled in. */
   function validate(evaluations) {
     if (!Array.isArray(evaluations) || evaluations.length > 20000) throw new Error(`Invalid ${label} evaluations.`);
     const ids = new Set();
@@ -53,6 +56,7 @@
     return evaluations;
   }
 
+  /** @param {import("./types").ReviewEvaluation} entry One review. @returns {import("./types").ReviewSummary} Assessed total, count, and rubric maximum. */
   function summary(entry) {
     validate([entry]);
     const values = criteria.map(({ id }) => entry.scores[id]).filter(value => value !== null);
@@ -62,12 +66,14 @@
   // Review date first; reviews on the same date keep the order they were first saved, even after later edits.
   const chronological = (a, b) => a.evaluatedOn.localeCompare(b.evaluatedOn) || Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id);
 
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Review history. @param {import("./types").TeamId} teamId Team to query. @returns {import("./types").ReviewEvaluation[]} Team reviews sorted by evaluation/creation time. */
   function reviews(evaluations, teamId) {
     return evaluations.filter(entry => entry.team.id === teamId).sort(chronological);
   }
 
   // Current coach result: student reviews never replace coach scores or reference notes.
   // Each criterion uses its latest assessed coach score and latest nonblank coach note.
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Review history. @param {import("./types").TeamId} teamId Team to query. @param {?string} [excludeId=null] Review omitted during editing. @returns {?import("./types").CurrentReview} Latest coach score/note per criterion, or null if unreviewed. */
   function current(evaluations, teamId, excludeId = null) {
     const history = reviews(evaluations, teamId).filter(entry => entry.id !== excludeId && entry.reviewRole !== "member");
     if (!history.length) return null;
@@ -82,6 +88,7 @@
     return { criteria: result, total: values.reduce((sum, score) => sum + score, 0), scored: values.length, maximum: criteria.length * maximum, reviews: history.length, latest: history[history.length - 1] };
   }
 
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Existing history. @param {Pick<import("./types").Team, "id"|"name">} team Team identity snapshot. @param {import("./types").ReviewInput} input Review fields. @param {?string} [reviewId=null] Existing review to replace. @param {string} [gameId=Game.ACTIVE_GAME_ID] Game tag for a new review. @returns {import("./types").ReviewEvaluation[]} New history array containing a copied review. */
   function save(evaluations, team, input, reviewId = null, gameId = Game.ACTIVE_GAME_ID) {
     validate(evaluations);
     const previous = reviewId === null ? null : evaluations.find(entry => entry.id === reviewId);
@@ -94,18 +101,21 @@
     return previous ? evaluations.map(existing => existing.id === previous.id ? copy : existing) : [...evaluations, copy];
   }
 
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Existing history. @param {string} reviewId Review ID to remove. @returns {import("./types").ReviewEvaluation[]} New array without the review. */
   function remove(evaluations, reviewId) {
     validate(evaluations);
     if (!evaluations.some(entry => entry.id === reviewId)) throw new Error(`This ${label} review no longer exists. Reload the latest data.`);
     return evaluations.filter(entry => entry.id !== reviewId);
   }
 
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Review history. @param {import("./types").TeamId} previousId Old team ID. @param {Pick<import("./types").Team, "id"|"name">} team New team identity. @returns {import("./types").ReviewEvaluation[]} Validated history with team snapshots remapped. */
   function rename(evaluations, previousId, team) {
     validate(evaluations);
     return validate(evaluations.map(entry => entry.team.id === previousId ? { ...entry, team: { id: team.id, name: team.name } } : entry));
   }
 
   // Backups merge by review ID: new reviews are added, and the most recently saved version of an edited review wins.
+  /** @param {import("./types").ReviewEvaluation[]} existing Local history. @param {import("./types").ReviewEvaluation[]} incoming Backup/shared history. @returns {import("./types").ReviewEvaluation[]} Merged reviews by ID and latest update time. */
   function merge(existing, incoming) {
     validate(existing); validate(incoming);
     const byId = new Map(existing.map(entry => [entry.id, entry]));
@@ -117,6 +127,7 @@
     return [...byId.values()];
   }
 
+  /** @param {import("./types").ReviewEvaluation[]} evaluations Reviews to export. @returns {string} Formula-safe CSV with rubric-specific criterion columns. */
   function csv(evaluations) {
     validate(evaluations);
     const headers = ["Team", "Team name", "Review number", "Evaluation date", "Reviewer", "Saved at (UTC)", "Rubric version", "Total", "Criteria scored", ...criteria.flatMap(item => [item.title, `${item.title} notes`]), "Overall feedback", "Game", "Review role", "Author email"];
@@ -148,6 +159,7 @@
     { id: "adaptation", section: "Working with others", title: "Outside ideas were made their own", prompt: "Ask how the team credited, modified, tested, and understood an idea from elsewhere.", questions: ["Did an outside idea inspire your robot or code?", "How did you adapt or test that idea, and how did you credit its source?"] }
   ], 0, 2, "interview");
   api.Interview = interview;
+  /** @param {import("./types").ScoreHistoryRecord[]} records Score history. @param {import("./types").Team[]} [teams=[]] Current roster. @param {import("./types").ReviewEvaluation[]} [notebooks=[]] Notebook reviews. @param {import("./types").ReviewEvaluation[]} [interviews=[]] Interview reviews. @param {(record: import("./types").ScoreHistoryRecord, teamId: import("./types").TeamId) => boolean} [include] History filter. @returns {import("./types").CombinedRankingRow[]} Combined 100-point rows with ranks and missing-data notes. */
   api.combinedRanking = function (records, teams = [], notebooks = [], interviews = [], include = () => true) {
     api.validate(notebooks);
     interview.validate(interviews);

@@ -278,6 +278,7 @@ test("team members can review any team, read their own team's feedback, and save
   expect(visibleTabs).toEqual(["rankings", "skills-rankings", "practice", "rubric", "interview", "analysis"]);
   await expect(member.locator('[data-tab="practice"]')).toHaveAttribute("aria-pressed", "true");
   await expect(member.locator("#footer-storage")).toHaveText("Team 2A member / scores saved to the shared Google Sheet");
+  await expect(member.locator("#associated-team")).toHaveText("Your team: 2A / Two");
   await expect(member.locator("#open-history")).toBeHidden();
   for (const name of ["control", "skills"]) {
     await member.goto(`/index.html#${name}`);
@@ -415,7 +416,7 @@ test("the local role preview shows the member view using the server's rules with
     await page.click(`[data-tab="${tabName}"]`);
     await page.selectOption(`#${prefix}-team`, "1A");
     await expect(page.locator(`#${prefix}-form-title`)).toContainText("New student review");
-    await page.selectOption(`#${prefix}-score-${criterion}`, "2");
+    await page.locator(`#${prefix}-guidance-${criterion} [data-guidance-score="2"]`).click();
     await page.fill(`#${prefix}-overall`, "Feedback from another team");
     await page.click(`#save-${prefix}`);
     await expect(page.locator(`#${prefix}-history-rows`)).toContainText("Student review (not ranked)");

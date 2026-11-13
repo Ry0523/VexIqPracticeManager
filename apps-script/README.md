@@ -15,7 +15,7 @@ Only the app owner sees **Settings > Student view**. Choose a roster team to pre
 
 **Practice / quick run separation:** members' new runs must have the student role and are excluded from all leaderboards, including Cumulative weighting leaders. They remain available for practice history and analysis. New coach runs are eligible; editing a student run as a coach preserves its student classification. Both save protocols reject a student submission claiming a coach role or omitting the role. Existing runs without role metadata remain eligible because their original submitting role was not recorded.
 
-The server checks the visitor's account and role on every load and save; hiding the editing screens is only a convenience. Members can add new practice runs and create, edit, or delete their own student reviews, but cannot turn them into coach reviews or change their authorship. Ownership uses the signed-in account, not the reviewer name. Both whole-event and change-based saves enforce these rules and preserve redacted feedback. Existing reviews without role metadata remain coach reviews. Score history is hidden in a member's app but still reaches their browser, because saving needs it. To change the editor domain, add a script property **EDITOR_DOMAIN** (for example `nu-district.org`); without it, `nu-district.org` is used.
+The server checks the visitor's account and role on every load and save; hiding the editing screens is only a convenience. Members can add new practice runs and create, edit, or delete their own student reviews, but cannot turn them into coach reviews or change their authorship. Ownership uses the signed-in account, not the reviewer name. Both whole-event and change-based saves enforce these rules and preserve redacted feedback. Existing reviews without role metadata remain coach reviews. Score data needed for practice and analysis still reaches a member's browser, but practice-run notes and robot notes are redacted; the Score history screen remains hidden. To change the editor domain, add a script property **EDITOR_DOMAIN** (for example `nu-district.org`); without it, `nu-district.org` is used.
 
 **Staying up to date:** every open page checks the sheet's revision number every 10 seconds (and whenever the tab becomes visible again). If someone else has saved and nothing is being edited on that page, it reloads the shared data itself, keeping its selected match and review team, and shows **Updated** with the time. If a score, review, timer, or form is in progress, it instead shows a notice; the page updates automatically once that work is posted or discarded, or the user can choose **Settings > Reload shared data** (which discards unposted work). That button appears only in this case or after a refused save; otherwise there is nothing to reload. Choosing a match is each person's own view and is not saved to the sheet. Saves from different pages merge: a page that has not yet picked up someone else's save can still post its own score, and then updates to show both. A save is refused only when someone else changed the same item first (see below).
 > **The script must be owned and deployed by an @nu-district.org account.** Google only tells the app a visitor's email address when the visitor is in the same Workspace domain as the account running the script. If a personal Gmail account deploys it, every visitor (including staff) is read-only.
@@ -28,20 +28,20 @@ The server checks the visitor's account and role on every load and save; hiding 
 4. From the parent workspace, run:
 
    ```powershell
-   node .\local-match-manager\build-apps-script.js
+   node .\local-match-manager\build-apps-script.js level-up
    ```
 
-5. In the Apps Script editor, paste the generated `dist/Code.gs` and `dist/Models.gs` into script files named **Code** and **Models**. Add an HTML file named **Index** and paste `dist/Index.html`. Enable **Show appsscript.json manifest file** in Project Settings and replace its contents with `dist/appsscript.json`. Alternatively, push these files with clasp (see [Updating from VS Code with clasp](#updating-from-vs-code-with-clasp)).
+5. In the Apps Script editor, paste the generated `dist-iq/Code.gs` and `dist-iq/Models.gs` into script files named **Code** and **Models**. Add an HTML file named **Index** and paste `dist-iq/Index.html`. Enable **Show appsscript.json manifest file** in Project Settings and replace its contents with `dist-iq/appsscript.json`. Alternatively, push these files with clasp (see [Updating from VS Code with clasp](#updating-from-vs-code-with-clasp)).
 6. In **Project Settings > Script properties**, add **SPREADSHEET_ID** with the ID from the spreadsheet URL (between `/d/` and `/edit`). This ID is configuration, not a password. Do not put credentials in the code.
 7. **Deploy > New deployment > Web app**, signed in as the @nu-district.org owner. Choose **Execute as: Me** and **Who has access: Anyone with Google account** (the manifest's `USER_DEPLOYING` / `ANYONE`). Do not choose anonymous access: Google would not identify editors, so everyone would be read-only. If "Anyone with Google account" is not offered, the district's Workspace admin has blocked sharing web apps outside the domain; ask them to allow it, or choose **Anyone within nu-district.org** (then only district accounts can open the app at all). Deploy and share the `/exec` URL, not a Drive HTML preview.
-8. The owner authorizes spreadsheet and email-address access once, on first deployment or run. Visitors only sign in to Google; they see no authorization screen. An error loading or saving the Sheet surfaces as a message; it never falls back to private browser storage.
+8. The owner authorizes spreadsheet, email-address, and external-request access once, on first deployment or run. Visitors only sign in to Google; they see no authorization screen. An error loading or saving the Sheet surfaces as a message; it never falls back to private browser storage.
 9. One scorekeeper imports the previously exported JSON backup from **Import backup** in the hosted app. Other open pages pick up the import automatically within about 10 seconds. Confirm the shared save status, then open **Settings > Manage access** and add the other coach and each team member. Until they are added, every account except the owner is read-only. Test from a listed member account (saves new practice runs only, reads only its own team's reviews, no Match control, Skills, or Score history), an unlisted @nu-district.org account, and a personal Gmail account (read-only view, no coaching notes, saves refused).
 
 Publishing requires your Google account and cannot be completed by generating files locally. Deployment under Shared Drive or Workspace policies may require an administrator. On source changes, rerun the build, update the project files, and deploy a new version of the same deployment.
 
 ## Updating from VS Code with clasp
 
-After the first setup, push changes from VS Code with [clasp](https://github.com/google/clasp) instead of pasting files. `local-match-manager\.clasp.json` links this folder to the Apps Script project, and its `rootDir` is `apps-script/dist`. Only the generated files are uploaded.
+After the first setup, push changes from VS Code with [clasp](https://github.com/google/clasp) instead of pasting files. `local-match-manager\.clasp-iq.json` links this folder to the IQ Apps Script project, and its `rootDir` is `apps-script/dist-iq`. Only the generated files are uploaded.
 
 One-time setup (in a VS Code terminal):
 
@@ -52,18 +52,27 @@ For each update, open a terminal in VS Code (**Terminal > New Terminal**) and ru
 
 ```powershell
 cd ".\local-match-manager"
-node .\build-apps-script.js
-npx clasp push
+npm run build:iq
+npx clasp --project .\.clasp-iq.json push
 npx clasp deployments
 npx clasp deploy -i <deploymentId> -d "Short description of change"
 ```
 
-- `build-apps-script.js` regenerates `apps-script/dist`. Always build before pushing; never edit `dist` by hand.
-- `clasp push` replaces the project's code with `dist`, including `appsscript.json`. If it asks to overwrite the manifest, answer yes. Pushing updates only the editor's code and the `/dev` test URL, not the shared `/exec` URL.
+- `build-apps-script.js level-up` regenerates `apps-script/dist-iq`. Always build before pushing; never edit generated files by hand.
+- `clasp push` replaces the project's code with `dist-iq`, including `appsscript.json`. If it asks to overwrite the manifest, answer yes. Pushing updates only the editor's code and the `/dev` test URL, not the shared `/exec` URL.
 - `clasp deployments` lists deployments. Copy the ID of the existing web app deployment (not the `@HEAD` entry).
 - `clasp deploy -i <deploymentId>` publishes a new version to that same deployment, so the shared `/exec` URL stays the same. Running `clasp deploy` without `-i` creates a new deployment with a different URL.
 
 You can instead push with clasp and publish in the browser: **Deploy > Manage deployments**, edit the existing web app deployment, choose **Version: New version**, and **Deploy**. Users may need to refresh the page to load the new version. Script properties (`SPREADSHEET_ID`, `FAVICON_URL`) are not affected by pushes.
+
+### Separate VEX V5 deployment
+
+Build the practice-only V5 target from the `local-match-manager` directory with `npm run build:v5`. It writes `apps-script/dist-v5` and does not replace the IQ `apps-script/dist-iq` output. Create a separate Apps Script project and spreadsheet for V5, then paste `Code.gs`, `Models.gs`, `Index.html`, and `appsscript.json` from `dist-v5` into that project. Configure its own `SPREADSHEET_ID` and deploy it under the intended V5 owner. Every account listed in **Settings > Manage access** has the same editing and access-management permissions; accounts not on the list are read-only. Teamwork practice records both Alliances and all four teams; its clock is 2:00 with a 15-second Autonomous Period. Driver and Autonomous Skills runs are solo, one-minute runs. Analysis refreshes official World Skills standings for the configured Ohio Middle School 4810 and High School 6008 groups whenever the tab opens; the Apps Script owner must authorize the manifest's `script.external_request` scope. Keep the two spreadsheets and web-app deployments separate.
+
+```powershell
+npm run build:v5
+npx clasp --project .\.clasp-v5.json push
+```
 
 ### Switching to a new season's game
 

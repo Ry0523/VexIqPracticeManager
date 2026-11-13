@@ -1,17 +1,19 @@
 {
-  "name": "local-match-manager",
-  "version": "1.0.0",
-  "description": "Open `index.html` in Microsoft Edge or Chrome. No install, account, server, or internet connection is required. Keep all files in this folder together.",
-  "main": "app.js",
-  "scripts": {
-    "test": "node --test core.test.js history.test.js practice.test.js rubric.test.js shared.test.js timer-audio.test.js finals.test.js game.test.js",
-    "test:browser": "playwright test"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@google/clasp": "3.4.1",
-    "@playwright/test": "^1.64.1"
-  }
+    "name": "local-match-manager",
+    "version": "1.0.0",
+    "description": "Open `index.html` in Microsoft Edge or Chrome. No install, account, server, or internet connection is required. Keep all files in this folder together.",
+    "main": "app.js",
+    "scripts": {
+        "test": "node --test tests/unit/event-rules.test.js tests/unit/finals.test.js tests/unit/game.test.js tests/unit/history.test.js tests/unit/practice.test.js tests/unit/rubric.test.js tests/unit/shared.test.js tests/unit/timer-audio.test.js",
+        "test:browser": "playwright test",
+        "build:iq": "node build-apps-script.js level-up",
+        "build:v5": "node build-apps-script.js override"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@google/clasp": "3.4.1",
+        "@playwright/test": "^1.64.1"
+    }
 }

@@ -1,3 +1,4 @@
+/** Shared UI controller for notebook and interview reviews, selected by rubric capability. */
 (function () {
   "use strict";
   const evidenceNotesKey = "rubric-evidence-notes";

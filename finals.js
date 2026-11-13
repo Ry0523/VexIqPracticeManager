@@ -1,12 +1,22 @@
+/** Finals bracket rules: qualification eligibility, seeding, series, and withdrawals. */
 (function (root) {
   "use strict";
-  const Core = typeof module !== "undefined" && module.exports ? require("./core.js") : root.MatchCore;
+  const Core = typeof module !== "undefined" && module.exports ? require("./event-rules.js") : root.EventRules;
   const Game = Core.Game;
 
+  /** @param {import("./types").Team[]} teams Full roster. @param {import("./types").Match[]} qualifications Qualification matches. @param {import("./types").GameDefinition} [game=Game.active] Rules for qualification standings. @returns {import("./types").StandingsRow[]} Ranked teams with at least one qualification appearance. */
   function eligible(teams, qualifications, game = Game.active) {
     return Core.standings(teams, qualifications, game).filter(team => qualifications.some(match => match.teams.includes(team.id) && match.surrogate !== team.id));
   }
 
+  /**
+   * Create a finals bracket in lowest-seed-first play order from qualification standings.
+  * @param {import("./types").Team[]} teams Full roster.
+  * @param {import("./types").Match[]} qualifications Fully posted qualification matches.
+   * @param {number} count Even number of advancing teams.
+   * @param {object} [game=Game.active] Rules for qualification standings.
+  * @returns {import("./types").FinalsMatch[]} Initial finals matches with seed, alliance, and play-order IDs.
+   */
   function generate(teams, qualifications, count, game = Game.active) {
     if (!qualifications.length || qualifications.some(match => !match.result)) throw new Error("Post every qualification result before generating finals.");
     const ranked = eligible(teams, qualifications, game);
@@ -16,15 +26,18 @@
     return alliances.reverse().map((alliance, index) => ({ ...alliance, phase: "finals", id: index + 1, round: 1, surrogate: null, result: null }));
   }
 
+  /** @param {import("./types").FinalsMatch} match Finals match. @param {import("./types").GameDefinition} [game=Game.active] Scoring definition. @returns {?number} Alliance score, or null until posted. */
   function score(match, game = Game.active) {
     if (!match.result) return null;
     return match.teams.some(id => match.result.statuses[id] === "dq") || match.teams.every(id => match.result.statuses[id] === "absent") ? 0 : Core.score(match.result.counts, game);
   }
 
+  /** @param {import("./types").FinalsMatch} match Posted finals match. @returns {number} Stop Time in seconds, or zero for an alliance disqualification/all-no-show. */
   function stopTime(match) {
     return match.teams.some(id => match.result.statuses[id] === "dq") || match.teams.every(id => match.result.statuses[id] === "absent") ? 0 : match.result.stopTime;
   }
 
+  /** @param {import("./types").FinalsMatch} match Finals match to validate. @param {import("./types").Team[]} teams Current roster. @param {import("./types").GameDefinition} [game=Game.active] Scoring and timer rules. @returns {import("./types").FinalsMatch} The same validated match. @throws {Error} If alliance, result, or Stop Time fields are invalid. */
   function validateMatch(match, teams, game = Game.active) {
     if (!match || match.phase !== "finals" || !Number.isInteger(match.id) || match.id < 1 || !Number.isInteger(match.seed) || match.seed < 1 || ![1, 2, 3].includes(match.round) || match.surrogate !== null || !Array.isArray(match.teams) || match.teams.length < 1 || match.teams.length > 2 || new Set(match.teams).size !== match.teams.length || !match.teams.every(id => teams.some(team => team.id === id))) throw new Error("Invalid finals match or alliance.");
     if (match.result !== null) {
@@ -35,6 +48,7 @@
     return match;
   }
 
+  /** @param {import("./types").FinalsMatch[]} matches Finals matches through the current round. @param {import("./types").GameDefinition} [game=Game.active] Scoring rules. @returns {import("./types").FinalsOutcome} Current result and any unresolved first-place series. */
   function outcome(matches, game = Game.active) {
     const initial = matches.filter(match => match.round === 1);
     const rows = initial.map(match => ({ seed: match.seed, teams: match.teams, score: score(match, game), rank: null, matches: matches.filter(item => item.seed === match.seed) }))
@@ -64,6 +78,7 @@
     return { rows, complete: true, pending: [], nextRound: null, champion };
   }
 
+  /** @param {import("./types").FinalsMatch[]} matches Existing finals series. @param {import("./types").GameDefinition} [game=Game.active] Scoring/tie rules. @returns {import("./types").FinalsMatch[]} Next round's matches for unresolved top seeds. @throws {Error} If no new tiebreaker is due. */
   function tiebreakers(matches, game = Game.active) {
     const status = outcome(matches, game);
     if (!status.nextRound) throw new Error("Finish the current finals series first; a new tiebreaker is only needed for an unresolved first-place tie.");
@@ -73,6 +88,7 @@
     }));
   }
 
+  /** @param {import("./types").Team[]} teams Current roster. @param {import("./types").Match[]} qualifications Qualification schedule/results. @param {import("./types").FinalsMatch[]} matches Finals bracket. @param {string[]} [withdrawn] Team IDs withdrawn from finals. @param {import("./types").GameDefinition} [game=Game.active] Game scoring rules. @returns {import("./types").FinalsMatch[]} The validated finals matches. */
   function validate(teams, qualifications, matches, withdrawn = [], game = Game.active) {
     if (!Array.isArray(matches) || matches.length > 300 || !Array.isArray(withdrawn) || new Set(withdrawn).size !== withdrawn.length || withdrawn.some(id => !teams.some(team => team.id === id))) throw new Error("Invalid finals schedule or withdrawn teams.");
     if (!matches.length) {
@@ -117,6 +133,7 @@
     return matches;
   }
 
+  /** @param {import("./types").Team[]} teams Current roster. @param {import("./types").Match[]} qualifications Qualification schedule/results. @param {import("./types").FinalsMatch[]} matches Current finals bracket. @param {string[]} withdrawn Previously withdrawn IDs. @param {string} teamId Team withdrawing before its alliance plays. @param {import("./types").GameDefinition} [game=Game.active] Qualification ranking rules. @returns {{matches: import("./types").FinalsMatch[], withdrawn: string[], replacement: (string|null)}} Updated bracket, withdrawal list, and replacement ID if available. */
   function withdraw(teams, qualifications, matches, withdrawn, teamId, game = Game.active) {
     const alliance = matches.find(match => match.round === 1 && match.teams.includes(teamId));
     if (!alliance || matches.some(match => match.seed === alliance.seed && match.result) || matches.some(match => match.round > 1)) throw new Error("Withdraw teams before their alliance plays and before any tiebreaker series is generated.");

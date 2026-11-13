@@ -3,6 +3,20 @@ const { test, expect } = require("@playwright/test");
 
 const { openApp, addTeams } = require("./helpers.js");
 
+test("IQ team analysis links profiles without bundled official standings", async ({ page }) => {
+  await openApp(page);
+  await addTeams(page, [["28101C", "Collaborated Croc's"], ["28102S", "Super Potatoes"]]);
+  await page.click('[data-tab="analysis"]');
+
+  await page.locator('[data-analysis-team="28101C"]').click();
+  await expect(page.locator("#team-profile")).toHaveAttribute("href", "https://events.vex.com/teams/VIQRC/28101C");
+  await expect(page.locator("#official-standings")).toBeHidden();
+
+  await page.locator('[data-analysis-team="28102S"]').click();
+  await expect(page.locator("#team-profile")).toHaveAttribute("href", "https://events.vex.com/teams/VIQRC/28102S");
+  await expect(page.locator("#official-standings")).toBeHidden();
+});
+
 async function scheduleAndPostFirstMatch(page) {
   await addTeams(page, [["1A", "One"], ["2A", "Two"], ["3A", "Three"], ["4A", "Four"]]);
   await page.locator("#schedule-form button[type=submit]").click();

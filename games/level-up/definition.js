@@ -1,7 +1,7 @@
 (function (root) {
   "use strict";
-  // VEX IQ Level Up game definition. Everything that changes with the yearly game lives here;
-  // see game.js for the interface and the ACTIVE_GAME_ID flag.
+  // VEX IQ game definition. Scoring, layout, standings configuration, and manual links for this season live here.
+  // game.js handles registration and the active-game flag.
   const POINTS = [1, 3, 6, 12, 16];
   const MAX_BAGS = 38;
   const LEVELS = ["Floor", "L1", "L2", "L3"];
@@ -46,6 +46,16 @@
     program: "VEX IQ",
     season: "2026\u20132027",
     fieldImage: "games/level-up/field.png",
+    teamProfileProgram: "VIQRC",
+    officialStandings: {
+      sourceUrl: "https://events.vex.com/robot-competitions/vex-iq-competition/standings/skills",
+      apiUrl: "https://events.vex.com/api/seasons/203/skills?post_season=0",
+      country: "United States",
+      countryId: 244,
+      region: "Ohio",
+      regionId: 47,
+      groups: [{ gradeLevel: "Elementary", teamPrefix: "28101" }, { gradeLevel: "Middle School", teamPrefix: "28102" }],
+    },
     manual: {
       url: "https://manuals.vex.com/iq/level-up/v2.1/event/",
       label: "Official rules v2.1",

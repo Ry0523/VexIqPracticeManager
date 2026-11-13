@@ -1,3 +1,4 @@
+/** Web Audio timer scheduler with a monotonic display clock and visual-only fallback. */
 (function (root) {
   "use strict";
   let context = null;
@@ -136,7 +137,7 @@
       gain.gain.value = document.getElementById("sound").checked ? 1 : 0;
       const origin = context.currentTime + 0.08;
       end = (origin + duration / 1000) * 1000;
-      const { openMs: switchOpen, closeMs: switchClose } = root.MatchCore.TIMING.driverSwitch;
+      const { openMs: switchOpen, closeMs: switchClose } = root.EventRules.TIMING.driverSwitch || {};
       const switching = driver;
       const nextCue = switching && remaining > switchOpen ? remaining - switchOpen : switching && remaining > switchClose ? remaining - switchClose : remaining;
       const startAt = origin + (countdown ? COUNTDOWN_MS / 1000 : 0);

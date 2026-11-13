@@ -1,265 +1,2330 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local Match Manager</title>
-  <link rel="icon" type="image/png" href="nu_robotics_logo_dark.png">
-  <link rel="apple-touch-icon" href="nu_robotics_logo_dark.png">
-  <link rel="stylesheet" href="games/level-up/styles.css">
-  <link rel="stylesheet" href="styles.css">
-  <script src="games/level-up/definition.js" defer></script>
-  <script src="game.js" defer></script>
-  <script src="core.js" defer></script>
-  <script src="finals.js" defer></script>
-  <script src="history.js" defer></script>
-  <script src="rubric.js" defer></script>
-  <script src="event.js" defer></script>
-  <script src="changes.js" defer></script>
-  <script src="storage.js" defer></script>
-  <script src="timer-sounds.js" defer></script>
-  <script src="timer-audio.js" defer></script>
-  <script src="app.js" defer></script>
-  <script src="skills.js" defer></script>
-  <script src="practice.js" defer></script>
-  <script src="rubric-guidance.js" defer></script>
-  <script src="rubric-ui.js" defer></script>
-  <script src="access-ui.js" defer></script>
-</head>
-<body>
-  <header class="topbar">
-    <h1 class="sr-only"><span data-game-name>Level Up</span> local match manager</h1>
-    <a class="brand" href="index.html"><img class="brand-logo" src="nu_robotics_logo_dark.png" alt="NU Robotics" width="56" height="50"><span><span data-game-name>Level Up</span><small>LOCAL MATCH MANAGER</small></span></a>
-    <div class="game-info"><img data-game-field src="games/level-up/field.png" alt="Level Up game field" width="120" height="60"><div><span class="game-season" data-game-season>VEX IQ / 2026&ndash;2027</span><a data-game-manual href="https://manuals.vex.com/iq/level-up/v2.1/event/" target="_blank" rel="noopener">Official rules v2.1 &#8599;</a></div></div>
-    <div class="header-actions"><span id="save-state" role="status">Loading...</span><button id="open-settings" class="settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-tray" aria-label="Settings" title="Settings"><span aria-hidden="true">&#9881;</span><span class="settings-label"> Settings</span></button></div>
-  </header>
-  <div id="student-preview-banner" class="student-preview-banner" role="status" hidden><span id="student-preview-label"></span><button id="exit-student-preview" type="button">Exit preview</button></div>
-  <dialog id="settings-tray" class="settings-tray" aria-labelledby="settings-title">
-    <div class="settings-tray-head"><h2 id="settings-title">Settings</h2><button id="close-settings" type="button" aria-label="Close settings" title="Close settings">&times;</button></div>
-    <section><p class="settings-heading">Timer</p><input id="sound" type="checkbox" checked hidden><label class="settings-toggle"><input id="timer-countdown" type="checkbox" checked> 3-second countdown</label><p class="settings-hint">Timer sound controls are inside the timer ring. Preferences apply to all timers on this device.</p></section>
-    <section id="settings-event-data"><p class="settings-heading">Event data</p><button id="export-backup" type="button">Export backup</button><button id="import-backup" type="button">Import backup</button><button id="reload-shared" type="button" hidden>Reload shared data</button><p id="backup-hint" class="settings-hint">Backups include the roster, schedule, and full score history.</p></section>
-    <section id="settings-access" hidden><p class="settings-heading">App access</p><button id="open-access" type="button">Manage access</button><p class="settings-hint">Choose who can score as a coach or team member.</p></section>
-    <section id="settings-student-preview" hidden><p class="settings-heading">Student view</p><label>Preview team<select id="preview-student-team"></select></label><button id="preview-student-view" type="button">Preview as student</button><p class="settings-hint">Uses live student redaction. Preview changes are discarded on exit.</p></section>
-    <input id="backup-file" type="file" accept=".json,application/json" hidden>
-  </dialog>
-  <nav class="tabs" aria-label="Event views"><button class="active" data-tab="setup" aria-pressed="true">Teams &amp; schedule <span id="team-count">0</span></button><button data-tab="control" aria-pressed="false">Match control</button><button data-tab="rankings" aria-pressed="false">Teamwork leaderboard</button><button data-tab="skills" aria-pressed="false">Skills</button><button data-tab="skills-rankings" aria-pressed="false">Skills leaderboard</button><button data-tab="practice" aria-pressed="false">Practice</button><button data-tab="rubric" aria-pressed="false">Notebook</button><button data-tab="interview" aria-pressed="false">Interview</button><button data-tab="analysis" aria-pressed="false">Cumulative leaderboard</button></nav>
-  <div id="notice" hidden><span id="notice-message" role="status"></span><button id="dismiss-notice" type="button" aria-label="Dismiss notification" title="Dismiss notification">&times;</button></div>
-  <dialog id="finals-dialog" aria-labelledby="finals-dialog-title"><form id="finals-form" method="dialog"><h2 id="finals-dialog-title">Generate finals</h2>
-    <p>Finals teams are paired by their current qualification ranks (<a data-game-rule="finals" href="https://manuals.vex.com/iq/level-up/v2.1/event/#t12" target="_blank" rel="noopener"><span data-game-name>Level Up</span> <span data-game-rule-label="finals">T12-T14</span></a>): ranks 1 and 2 form seed 1, ranks 3 and 4 form seed 2, and so on. Alliances play in seed order, lowest seed first. The highest finals score wins.</p>
-    <p>After you create finals, qualification scores are locked. Finals scores appear at the top of the Teamwork leaderboard and do not change qualification averages.</p>
-    <label>Advancing teams (even number)<input id="finals-team-count" type="number" min="2" max="200" step="2" value="2" required></label><p id="finals-count-help" class="rules-note"></p>
-    <p class="rules-note">The Event Partner chooses the advancing count. For events qualifying directly to Worlds, T13 requires at least five finals alliances (10 teams) per division when ten or more teams attend.</p>
-    <div class="finals-actions"><button id="cancel-finals" type="button" value="cancel">Cancel</button><button id="confirm-finals" class="primary" type="submit">Create finals</button></div></form></dialog>
-  <dialog id="robot-dialog" aria-labelledby="robot-dialog-title"><div class="section-heading"><h2 id="robot-dialog-title">Robot versions</h2><button id="close-robots" type="button" aria-label="Close robot versions" title="Close">&times;</button></div>
-    <p class="rules-note">Mark a new robot when the team builds a substantially different design. Each score belongs to the robot in use when it was first posted (practice runs use the entered run time). Leaderboards count only each team's current robot; Cumulative leaderboard team details can compare versions. Saved scores are never changed, so you can add, back-date, edit, or remove versions at any time. Removing a version lets you either count its results for the previous robot or abandon them (kept for comparison, excluded from leaderboards).</p>
-    <div class="table-scroll"><table><thead><tr><th>Robot</th><th>Started (local)</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="robot-rows"></tbody></table></div>
-    <section id="robot-remove-panel" class="robot-remove-panel" hidden aria-labelledby="robot-remove-title"><h3 id="robot-remove-title">Remove robot?</h3><p id="robot-remove-message"></p><ul class="robot-remove-help"><li id="robot-remove-merge-help"></li><li id="robot-remove-abandon-help">Abandon keeps the results in history, the robot comparison, and exports, but leaves them out of every leaderboard. Results recorded after now go back to the previous robot. You can Restore it later.</li></ul><div class="finals-actions"><button id="cancel-robot-remove" type="button">Cancel</button><button id="robot-remove-merge" type="button">Count results for previous robot</button><button id="robot-remove-abandon" type="button" class="danger">Abandon results</button></div></section>
-    <form id="robot-form"><h3 id="robot-form-title">Mark a new robot</h3><div class="robot-fields"><label>Robot name<input id="robot-name" maxlength="60" required></label><label>Started<input id="robot-started" type="datetime-local" required></label></div><label>Notes<textarea id="robot-notes" maxlength="500" rows="2" placeholder="What changed? (optional)"></textarea></label><p id="robot-error" class="robot-error" role="alert"></p><div class="finals-actions"><button id="cancel-robot-edit" type="button" hidden>Cancel edit</button><button id="save-robot" class="primary" type="submit">Add robot</button></div></form></dialog>
-  <dialog id="leave-dialog" aria-labelledby="leave-dialog-title" aria-describedby="leave-dialog-message"><h2 id="leave-dialog-title">Leave the match manager?</h2><p id="leave-dialog-message">You're at the start of your navigation history. Going back will leave this app.</p><div class="finals-actions"><button id="leave-app" type="button" class="danger">Leave app</button><button id="stay-in-app" type="button" class="primary" autofocus>Stay</button></div></dialog>
-  <dialog id="confirm-dialog" aria-labelledby="confirm-message"><p id="confirm-message"></p><div class="finals-actions"><button id="confirm-cancel" type="button">Cancel</button><button id="confirm-ok" type="button" class="primary">OK</button></div></dialog>  <main inert>
-    <section id="setup-view" class="view setup-layout">
-      <div class="roster-section"><div class="section-heading"><h2>Team roster</h2><span id="roster-lock">Registration open</span></div>
-        <form id="team-form" class="team-form"><label>Team number<input id="team-id" placeholder="12345A" maxlength="20" required pattern="[A-Za-z0-9\-]+"></label><label>Team name<input id="team-name" placeholder="Team name" maxlength="80" required></label><div class="team-form-actions"><button id="save-team" class="primary" type="submit">Add team</button><button id="cancel-team-edit" type="button" hidden>Cancel edit</button></div></form>
-        <div class="table-scroll"><table><thead><tr><th scope="col" aria-sort="none"><button class="roster-sort-button" data-roster-sort="id" title="Sort by team number; click again to reverse">Team<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button class="roster-sort-button" data-roster-sort="name" title="Sort by team name; click again to reverse">Name<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col">Include in schedule</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="roster"></tbody></table></div>
-        <p class="rules-note">Uncheck this box to keep a team on the team list but leave it out of matches. Your choice saves automatically. To change it after making a schedule, choose End event. Skills-only teams are not affected.</p>
-        <p id="roster-empty" class="empty">No teams registered.</p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Match Manager</title>
+    <link rel="icon" type="image/png" href="nu_robotics_logo_dark.png" />
+    <link rel="apple-touch-icon" href="nu_robotics_logo_dark.png" />
+    <link rel="stylesheet" href="games/level-up/styles.css" />
+    <link rel="stylesheet" href="games/override/styles.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="games/level-up/definition.js" defer></script>
+    <script src="games/override/definition.js" defer></script>
+    <script src="games/override/practice-ui.js" defer></script>
+    <script src="game.js" defer></script>
+    <script src="scoring.js" defer></script>
+    <script src="scheduling.js" defer></script>
+    <script src="teams.js" defer></script>
+    <script src="event-rules.js" defer></script>
+    <script src="finals.js" defer></script>
+    <script src="history.js" defer></script>
+    <script src="rubric.js" defer></script>
+    <script src="event.js" defer></script>
+    <script src="changes.js" defer></script>
+    <script src="storage.js" defer></script>
+    <script src="timer-sounds.js" defer></script>
+    <script src="timer-audio.js" defer></script>
+    <script src="app.js" defer></script>
+    <script src="skills.js" defer></script>
+    <script src="practice.js" defer></script>
+    <script src="rubric-guidance.js" defer></script>
+    <script src="rubric-ui.js" defer></script>
+    <script src="access-ui.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1 class="sr-only">
+        <span data-game-name>VEX IQ</span>
+        local match manager
+      </h1>
+      <a class="brand" href="index.html">
+        <img
+          class="brand-logo"
+          src="nu_robotics_logo_dark.png"
+          alt="NU Robotics"
+          width="56"
+          height="50"
+        />
+        <span>
+          <span data-game-name>VEX IQ</span>
+          <small>LOCAL MATCH MANAGER</small>
+        </span>
+      </a>
+      <div class="game-info">
+        <img
+          data-game-field
+          src="games/level-up/field.png"
+          alt="VEX IQ game field"
+          width="120"
+          height="60"
+        />
+        <div>
+          <span class="game-season" data-game-season>
+            VEX IQ / 2026&ndash;2027
+          </span>
+          <span id="associated-team" class="associated-team" hidden></span>
+          <a
+            data-game-manual
+            href="https://manuals.vex.com/iq/level-up/v2.1/event/"
+            target="_blank"
+            rel="noopener"
+          >
+            Official rules v2.1 &#8599;
+          </a>
+        </div>
       </div>
-      <aside class="schedule-builder"><p class="eyebrow">EVENT SETUP</p><h2>Build your schedule</h2><form id="schedule-form"><label>Matches per team<input id="rounds" type="number" min="1" max="30" value="6" required></label><div class="form-row"><label>First match<input id="start-time" type="time" value="09:00" required></label><label>Minutes apart<input id="interval" type="number" min="1" max="60" value="3" required></label></div><div class="schedule-estimate" id="schedule-estimate">0 matches / 0 teams</div><button class="primary" type="submit" id="generate">Start event</button><button type="button" id="clear-schedule" class="danger" hidden>End event</button></form><a data-game-rule="schedule" href="https://manuals.vex.com/iq/level-up/v2.1/event/#t9" target="_blank" rel="noopener">Qualification rule <span data-game-rule-label="schedule">T9</span> &#8599;</a></aside>
-    </section>
-    <section id="control-view" class="view control-layout" hidden>
-      <div id="print-sheet" class="print-sheet" aria-hidden="true"></div>
-      <aside class="match-list"><div class="section-heading"><h2>Schedule</h2><button id="print-schedule" title="Print schedule">Print</button></div><h3 class="match-list-heading">Qualifications</h3><div id="match-list"></div>
-        <div id="finals-controls"><button id="generate-finals" class="primary" type="button">Generate finals</button><p id="finals-readiness" class="rules-note"></p>
-          <div id="finals-section" hidden><h3 class="match-list-heading">Finals</h3><p id="finals-status" role="status"></p><div id="finals-match-list"></div>
-            <div class="finals-actions"><button id="generate-tiebreaker" type="button" class="primary" hidden>Generate tiebreakers</button><button id="void-tiebreaker" type="button" class="danger" hidden>Void latest tiebreaker series</button><button id="export-finals" type="button">Export finals CSV</button><button id="clear-finals" type="button" class="danger" hidden>Discard unplayed finals</button></div>
-            <details id="finals-withdraw"><summary>Withdraw a finals team</summary><p class="rules-note">Available before that alliance plays and before any tiebreaker. The next available qualification-ranked team replaces it; if none remain, its partner plays alone.</p><div id="finals-withdrawals"></div></details>
-          </div></div></aside>
-      <section class="field-control"><div id="match-empty" class="empty">No matches scheduled.</div><div id="match-workspace" hidden>
-        <div class="flow-bar"><span class="flow-step-label" id="flow-step-label">Timer</span><button id="flow-exit" type="button">Exit full screen &times;</button></div>
-        <div class="section-heading"><h2 id="current-match">Qualification 1</h2><span id="match-status" class="status-pill">Ready</span></div>
-        <div id="alliance" class="alliance"></div>
-        <div class="timer-stage" id="timer-stage"><div class="timer-label" id="timer-label">READY FOR MATCH</div><div class="timer-dial" id="timer-dial"><output id="timer" aria-label="Seconds remaining" data-game-clock>01:00</output><button class="timer-sound-toggle" type="button" aria-label="Timer sound" aria-pressed="true" title="Disable timer sound"><svg class="sound-icon-on" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg><svg class="sound-icon-off" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg></button></div><div class="timer-actions"><button id="start-timer" class="primary">Start match</button><button id="reset-timer">Reset timer</button><button id="flow-score" type="button" class="flow-only">Score match &#8594;</button><button id="fullscreen" title="Full-screen match flow" aria-label="Full-screen match flow">&#x26F6;</button></div></div>
-        <div id="finals-stop-field" hidden><label>Match Stop Time (seconds remaining)<input id="finals-stop-time" type="number" min="0" max="60" data-game-seconds step="1" value="0" required></label><button id="end-finals-early" type="button">End tiebreaker early</button><p class="rules-note">In a tiebreaker, enter the time shown when both controllers are on the ground. Pausing the timer does not save this time.</p></div>
-        <form id="score-form"><div class="section-heading"><h2>Field score</h2><div class="score-tools"><span id="bag-total">0 / 38 bags</span><button id="reset-score" type="button" title="Reset field score" aria-label="Reset field score">&#8634;</button></div></div><div class="score-total"><span>Alliance total</span><output id="score-total" aria-live="polite">0</output><span>POINTS</span></div><div id="scoring-inputs" class="score-calculator"></div><div id="team-statuses" class="team-statuses"></div><div class="score-actions"><button id="flow-back" type="button" class="flow-only">&#8592; Back to timer</button><button class="primary" id="save-score" type="submit">Post score</button><button id="clear-result" type="button" class="danger" hidden>Remove result</button><button id="next-match" type="button">Next unscored match &#8594;</button><button id="flow-next" type="button" class="primary flow-only">Post &amp; next match &#8594;</button></div></form>
-      </div></section>
-      <aside class="live-standings"><div class="section-heading"><h2>Live standings</h2><span class="live-dot">LIVE</span></div><div id="mini-standings"></div></aside>
-    </section>
-    <section id="rankings-view" class="view" hidden>
-      <h2>Teamwork leaderboard</h2>
-      <section id="finals-rankings" hidden><div class="section-heading"><div><p class="eyebrow">ACTIVE EVENT</p><h3>Finals results</h3></div><button id="open-finals" type="button">Open in Match control</button></div><p id="finals-ranking-status" role="status"></p><div class="table-scroll"><table><thead><tr><th>Place</th><th>Seed</th><th>Alliance</th><th>Finals score</th><th>Tiebreaker 1 (score / Stop Time)</th><th>Tiebreaker 2 (score / Stop Time)</th></tr></thead><tbody id="finals-ranking-rows"></tbody></table></div><p class="rules-note"><span data-game-name>Level Up</span> <span data-game-rule-label="finals">T12-T14</span>: If teams tie for first, they play an extra match called a tiebreaker. If they tie again, they play one more. If they still tie, the higher seed wins. Other ties go to the higher seed. A disqualification gives the whole pair 0 points. Results are not final until all needed matches are played.</p></section>
-      <section id="qualification-rankings" hidden>
-        <div class="section-heading"><div><p class="eyebrow">ACTIVE EVENT</p><h3>Current qualification rankings</h3></div></div>
-        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Team</th><th>Name</th><th>Played</th><th>Dropped</th><th>Average</th><th>Score history</th></tr></thead><tbody id="standings"></tbody></table></div>
-        <p class="rules-note">After 4, 8, 12, and 16 matches, leave out each team’s lowest 1, 2, 3, or 4 scores. A no-show score is never left out. An extra match marked * does not count toward that team’s average. If teams tie, compare them again after leaving out their next-lowest scores. If they are still tied, use the saved draw.</p>
+      <div class="header-actions">
+        <span id="save-state" role="status">Loading...</span>
+        <button
+          id="open-settings"
+          class="settings-button"
+          type="button"
+          aria-haspopup="dialog"
+          aria-controls="settings-tray"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <span aria-hidden="true">&#9881;</span>
+          <span class="settings-label">Settings</span>
+        </button>
+      </div>
+    </header>
+    <div
+      id="student-preview-banner"
+      class="student-preview-banner"
+      role="status"
+      hidden
+    >
+      <span id="student-preview-label"></span>
+      <button id="exit-student-preview" type="button">Exit preview</button>
+    </div>
+    <!-- Settings, local data, and optional access/preview controls. -->
+    <dialog
+      id="settings-tray"
+      class="settings-tray"
+      aria-labelledby="settings-title"
+    >
+      <div class="settings-tray-head">
+        <h2 id="settings-title">Settings</h2>
+        <button
+          id="close-settings"
+          type="button"
+          aria-label="Close settings"
+          title="Close settings"
+        >
+          &times;
+        </button>
+      </div>
+      <section>
+        <p class="settings-heading">Timer</p>
+        <input id="sound" type="checkbox" checked hidden />
+        <label class="settings-toggle">
+          <input id="timer-countdown" type="checkbox" checked />
+          3-second countdown
+        </label>
+        <p class="settings-hint">
+          Timer sound controls are inside the timer ring. Preferences apply to
+          all timers on this device.
+        </p>
       </section>
-      <div class="section-heading"><div><p class="eyebrow">EVENTS AND PRACTICE / ALL TIME</p><h3>All-time team rankings</h3></div></div>
-      <p class="rules-note">Each team’s best Teamwork score from events and coach-run practice is used. Extra appearances are included. Teams with the same best score share a rank. This score belongs to the whole pair, not one robot. Only scores from the robot marked Current count.</p>
-      <p class="rules-note">Tied best scores show the earliest known date among surviving results. Unknown means the date was not recorded; -- means no result.</p>
-      <p class="rules-note">Unpromoted student-entered practice / quick runs are excluded from rankings. Coaches can promote saved runs from the Practice tab.</p>
-      <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Team</th><th>Name</th><th>Best score</th><th>Best-score date (local)</th><th>Recorded matches</th></tr></thead><tbody id="teamwork-all-time"></tbody></table></div>
-    </section>
-    <section id="skills-view" class="view skills-layout" hidden>
-      <aside class="skills-settings"><div class="section-heading"><h2>Teams</h2><span id="skills-team-count">0</span></div>
-        <label class="skills-check"><input id="skills-only" type="checkbox"> Skills-only event</label>
-        <div id="skills-team-list" aria-label="Skills teams"></div>
-        <a data-game-rule="skills" href="https://manuals.vex.com/iq/level-up/v2.1/event/#t17" target="_blank" rel="noopener">Skills ranking rules <span data-game-rule-label="skills">T17</span> &#8599;</a>
-      </aside>
-      <section class="skills-entry"><p id="skills-empty" class="empty">No teams registered.</p><div id="skills-workspace" hidden>
-        <div id="skills-flow-bar" class="skills-flow-bar"><span id="skills-flow-label">Skills run</span><button id="skills-flow-exit" type="button">Exit full screen &times;</button></div>
-        <div id="skills-selected-header" class="section-heading"><div id="skills-selected-team" class="alliance-team"></div><span id="skills-progress">0 / 6 recorded</span></div>
-        <p id="skills-eligibility" class="skills-eligibility">Qualification participation required</p>
-        <div id="skills-attempt-log"></div>
-        <div id="skills-attempt-header" class="section-heading"><h2 id="skills-heading">Driver / Attempt 1</h2><span id="skills-posted" class="status-pill">Unrecorded</span></div>
-        <div id="skills-timer-stage" class="timer-stage skills-clock"><div id="skills-timer-label" class="timer-label">READY FOR SKILLS</div><div class="timer-dial" id="skills-timer-dial"><output id="skills-timer" aria-label="Skills seconds remaining" data-game-clock>01:00</output><button class="timer-sound-toggle" type="button" aria-label="Timer sound" aria-pressed="true" title="Disable timer sound"><svg class="sound-icon-on" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg><svg class="sound-icon-off" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg></button></div><div id="skills-run-controls" class="run-transport" data-state="ready"><button id="reset-skills-timer" class="run-control run-control-left" type="button" aria-label="Reset timer" title="Reset timer" hidden><svg class="run-reset-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a9 9 0 1 1 2.64 6.36L3 15"/><path d="M3 20v-5h5"/></svg><svg class="run-cancel-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button><button id="start-skills" class="run-control run-control-play" type="button" aria-label="Start run" title="Start run"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4.5a1 1 0 0 1 1.5-.86l11 6.35a1 1 0 0 1 0 1.74l-11 6.35A1 1 0 0 1 7 17.22Z"/></svg></button><button id="pause-skills" class="run-control run-control-left" type="button" aria-label="Pause run" title="Pause run" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM15 5h4v14h-4z"/></svg></button><button id="stop-skills" class="run-control run-control-right" type="button" aria-label="Stop run" title="Stop run" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button></div><div class="timer-actions"><button id="start-skills-end" type="button" hidden></button></div></div>
-        <form id="skills-form"><div class="skills-result-fields"><label class="skills-check"><input id="skills-opt-in" type="checkbox"> Stop time agreed before match</label><label>Stop time (seconds remaining)<input id="skills-stop-time" type="number" min="0" max="60" data-game-seconds step="1" value="0" required disabled></label><label>Result<select id="skills-status"><option value="ok">Regular score</option><option value="dq">Disqualified (0)</option><option value="forfeit">Forfeited (0)</option></select></label></div>
-          <div class="section-heading"><h2>Field score</h2><div class="score-tools"><span id="skills-bag-total">0 / 38 bags</span><button id="reset-skills-score" type="button" title="Reset skills field score" aria-label="Reset skills field score">&#8634;</button></div></div><div class="score-total"><span>Skills score</span><output id="skills-score-total" aria-live="polite">0</output><span>POINTS</span></div><div id="skills-scoring-inputs" class="score-calculator"></div>
-          <div class="score-actions"><button id="save-skills" class="primary" type="submit">Post skills score</button><button id="void-skills" type="button" class="danger" hidden>Void attempt</button><button id="next-skills" type="button">Next unused attempt &#8594;</button></div>
+      <section id="settings-event-data">
+        <p class="settings-heading">Event data</p>
+        <button id="export-backup" type="button">Export backup</button>
+        <button id="import-backup" type="button">Import backup</button>
+        <button id="reload-shared" type="button" hidden>
+          Reload shared data
+        </button>
+        <p id="backup-hint" class="settings-hint">
+          Backups include the roster, schedule, and full score history.
+        </p>
+      </section>
+      <section id="settings-access" hidden>
+        <p class="settings-heading">App access</p>
+        <button id="open-access" type="button">Manage access</button>
+        <p id="settings-access-hint" class="settings-hint">
+          Choose who can score as a coach or team member.
+        </p>
+      </section>
+      <section id="settings-student-preview" hidden>
+        <p class="settings-heading">Student view</p>
+        <label>
+          Preview team
+          <select id="preview-student-team"></select>
+        </label>
+        <button id="preview-student-view" type="button">
+          Preview as student
+        </button>
+        <p class="settings-hint">
+          Uses live student redaction. Preview changes are discarded on exit.
+        </p>
+      </section>
+      <input
+        id="backup-file"
+        type="file"
+        accept=".json,application/json"
+        hidden
+      />
+    </dialog>
+    <!-- Top-level navigation remains a single-page tab interface. -->
+    <nav class="tabs" aria-label="Event views">
+      <button class="active" data-tab="setup" aria-pressed="true">
+        Teams &amp; schedule
+        <span id="team-count">0</span>
+      </button>
+      <button data-tab="control" aria-pressed="false">Match control</button>
+      <button data-tab="rankings" aria-pressed="false">
+        Teamwork leaderboard
+      </button>
+      <button data-tab="skills" aria-pressed="false">Skills</button>
+      <button data-tab="skills-rankings" aria-pressed="false">
+        Skills leaderboard
+      </button>
+      <button data-tab="practice" aria-pressed="false">Practice</button>
+      <button data-tab="rubric" aria-pressed="false">Notebook</button>
+      <button data-tab="interview" aria-pressed="false">Interview</button>
+      <button data-tab="analysis" aria-pressed="false">
+        Cumulative leaderboard
+      </button>
+    </nav>
+    <div id="notice" hidden>
+      <span id="notice-message" role="status"></span>
+      <button
+        id="dismiss-notice"
+        type="button"
+        aria-label="Dismiss notification"
+        title="Dismiss notification"
+      >
+        &times;
+      </button>
+    </div>
+    <!-- Event workflow dialogs. -->
+    <dialog id="finals-dialog" aria-labelledby="finals-dialog-title">
+      <form id="finals-form" method="dialog">
+        <h2 id="finals-dialog-title">Generate finals</h2>
+        <p>
+          Finals teams are paired by their current qualification ranks (
+          <a
+            data-game-rule="finals"
+            href="https://manuals.vex.com/iq/level-up/v2.1/event/#t12"
+            target="_blank"
+            rel="noopener"
+          >
+            <span data-game-name>Level Up</span>
+            <span data-game-rule-label="finals">T12-T14</span>
+          </a>
+          ): ranks 1 and 2 form seed 1, ranks 3 and 4 form seed 2, and so on.
+          Alliances play in seed order, lowest seed first. The highest finals
+          score wins.
+        </p>
+        <p>
+          After you create finals, qualification scores are locked. Finals
+          scores appear at the top of the Teamwork leaderboard and do not change
+          qualification averages.
+        </p>
+        <label>
+          Advancing teams (even number)
+          <input
+            id="finals-team-count"
+            type="number"
+            min="2"
+            max="200"
+            step="2"
+            value="2"
+            required
+          />
+        </label>
+        <p id="finals-count-help" class="rules-note"></p>
+        <p class="rules-note">
+          The Event Partner chooses the advancing count. For events qualifying
+          directly to Worlds, T13 requires at least five finals alliances (10
+          teams) per division when ten or more teams attend.
+        </p>
+        <div class="finals-actions">
+          <button id="cancel-finals" type="button" value="cancel">
+            Cancel
+          </button>
+          <button id="confirm-finals" class="primary" type="submit">
+            Create finals
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="robot-dialog" aria-labelledby="robot-dialog-title">
+      <div class="section-heading">
+        <h2 id="robot-dialog-title">Robot versions</h2>
+        <button
+          id="close-robots"
+          type="button"
+          aria-label="Close robot versions"
+          title="Close"
+        >
+          &times;
+        </button>
+      </div>
+      <p class="rules-note">
+        Mark a new robot when the team builds a substantially different design.
+        Each score belongs to the robot in use when it was first posted
+        (practice runs use the entered run time). Leaderboards count only each
+        team's current robot; Cumulative leaderboard team details can compare
+        versions. Saved scores are never changed, so you can add, back-date,
+        edit, or remove versions at any time. Removing a version lets you either
+        count its results for the previous robot or abandon them (kept for
+        comparison, excluded from leaderboards).
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Robot</th>
+              <th>Started (local)</th>
+              <th>Notes</th>
+              <th><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="robot-rows"></tbody>
+        </table>
+      </div>
+      <section
+        id="robot-remove-panel"
+        class="robot-remove-panel"
+        hidden
+        aria-labelledby="robot-remove-title"
+      >
+        <h3 id="robot-remove-title">Remove robot?</h3>
+        <p id="robot-remove-message"></p>
+        <ul class="robot-remove-help">
+          <li id="robot-remove-merge-help"></li>
+          <li id="robot-remove-abandon-help">
+            Abandon keeps the results in history, the robot comparison, and
+            exports, but leaves them out of every leaderboard. Results recorded
+            after now go back to the previous robot. You can Restore it later.
+          </li>
+        </ul>
+        <div class="finals-actions">
+          <button id="cancel-robot-remove" type="button">Cancel</button>
+          <button id="robot-remove-merge" type="button">
+            Count results for previous robot
+          </button>
+          <button id="robot-remove-abandon" type="button" class="danger">
+            Abandon results
+          </button>
+        </div>
+      </section>
+      <form id="robot-form">
+        <h3 id="robot-form-title">Mark a new robot</h3>
+        <div class="robot-fields">
+          <label>
+            Robot name
+            <input id="robot-name" maxlength="60" required />
+          </label>
+          <label>
+            Started
+            <input id="robot-started" type="datetime-local" required />
+          </label>
+        </div>
+        <label>
+          Notes
+          <textarea
+            id="robot-notes"
+            maxlength="500"
+            rows="2"
+            placeholder="What changed? (optional)"
+          ></textarea>
+        </label>
+        <p id="robot-error" class="robot-error" role="alert"></p>
+        <div class="finals-actions">
+          <button id="cancel-robot-edit" type="button" hidden>
+            Cancel edit
+          </button>
+          <button id="save-robot" class="primary" type="submit">
+            Add robot
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog
+      id="leave-dialog"
+      aria-labelledby="leave-dialog-title"
+      aria-describedby="leave-dialog-message"
+    >
+      <h2 id="leave-dialog-title">Leave the match manager?</h2>
+      <p id="leave-dialog-message">
+        You're at the start of your navigation history. Going back will leave
+        this app.
+      </p>
+      <div class="finals-actions">
+        <button id="leave-app" type="button" class="danger">Leave app</button>
+        <button id="stay-in-app" type="button" class="primary" autofocus>
+          Stay
+        </button>
+      </div>
+    </dialog>
+    <dialog id="confirm-dialog" aria-labelledby="confirm-message">
+      <p id="confirm-message"></p>
+      <div class="finals-actions">
+        <button id="confirm-cancel" type="button">Cancel</button>
+        <button id="confirm-ok" type="button" class="primary">OK</button>
+      </div>
+    </dialog>
+    <!-- Main views: setup, match control, results, practice, and reviews. -->
+    <main inert>
+      <!-- Team roster and schedule configuration. -->
+      <section id="setup-view" class="view setup-layout">
+        <div class="roster-section">
+          <div class="section-heading">
+            <h2>Team roster</h2>
+            <span id="roster-lock">Registration open</span>
+          </div>
+          <form id="team-form" class="team-form">
+            <label>
+              Team number
+              <input
+                id="team-id"
+                placeholder="12345A"
+                maxlength="20"
+                required
+                pattern="[A-Za-z0-9\-]+"
+              />
+            </label>
+            <label>
+              Team name
+              <input
+                id="team-name"
+                placeholder="Team name"
+                maxlength="80"
+                required
+              />
+            </label>
+            <div class="team-form-actions">
+              <button id="save-team" class="primary" type="submit">
+                Add team
+              </button>
+              <button id="cancel-team-edit" type="button" hidden>
+                Cancel edit
+              </button>
+            </div>
+          </form>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col" aria-sort="none">
+                    <button
+                      class="roster-sort-button"
+                      data-roster-sort="id"
+                      title="Sort by team number; click again to reverse"
+                    >
+                      Team
+                      <span class="sort-indicator" aria-hidden="true"></span>
+                    </button>
+                  </th>
+                  <th scope="col" aria-sort="none">
+                    <button
+                      class="roster-sort-button"
+                      data-roster-sort="name"
+                      title="Sort by team name; click again to reverse"
+                    >
+                      Name
+                      <span class="sort-indicator" aria-hidden="true"></span>
+                    </button>
+                  </th>
+                  <th scope="col">Include in schedule</th>
+                  <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="roster"></tbody>
+            </table>
+          </div>
+          <p class="rules-note">
+            Uncheck this box to keep a team on the team list but leave it out of
+            matches. Your choice saves automatically. To change it after making
+            a schedule, choose End event. Skills-only teams are not affected.
+          </p>
+          <p id="roster-empty" class="empty">No teams registered.</p>
+        </div>
+        <aside class="schedule-builder">
+          <p class="eyebrow">EVENT SETUP</p>
+          <h2>Build your schedule</h2>
+          <form id="schedule-form">
+            <label>
+              Matches per team
+              <input
+                id="rounds"
+                type="number"
+                min="1"
+                max="30"
+                value="6"
+                required
+              />
+            </label>
+            <div class="form-row">
+              <label>
+                First match
+                <input id="start-time" type="time" value="09:00" required />
+              </label>
+              <label>
+                Minutes apart
+                <input
+                  id="interval"
+                  type="number"
+                  min="1"
+                  max="60"
+                  value="3"
+                  required
+                />
+              </label>
+            </div>
+            <div class="schedule-estimate" id="schedule-estimate">
+              0 matches / 0 teams
+            </div>
+            <button class="primary" type="submit" id="generate">
+              Start event
+            </button>
+            <button type="button" id="clear-schedule" class="danger" hidden>
+              End event
+            </button>
+          </form>
+          <a
+            data-game-rule="schedule"
+            href="https://manuals.vex.com/iq/level-up/v2.1/event/#t9"
+            target="_blank"
+            rel="noopener"
+          >
+            Qualification rule
+            <span data-game-rule-label="schedule">T9</span>
+            &#8599;
+          </a>
+        </aside>
+      </section>
+      <!-- Qualification/finals schedule, match timer, and scoring. -->
+      <section id="control-view" class="view control-layout" hidden>
+        <div id="print-sheet" class="print-sheet" aria-hidden="true"></div>
+        <aside class="match-list">
+          <div class="section-heading">
+            <h2>Schedule</h2>
+            <button id="print-schedule" title="Print schedule">Print</button>
+          </div>
+          <h3 class="match-list-heading">Qualifications</h3>
+          <div id="match-list"></div>
+          <div id="finals-controls">
+            <button id="generate-finals" class="primary" type="button">
+              Generate finals
+            </button>
+            <p id="finals-readiness" class="rules-note"></p>
+            <div id="finals-section" hidden>
+              <h3 class="match-list-heading">Finals</h3>
+              <p id="finals-status" role="status"></p>
+              <div id="finals-match-list"></div>
+              <div class="finals-actions">
+                <button
+                  id="generate-tiebreaker"
+                  type="button"
+                  class="primary"
+                  hidden
+                >
+                  Generate tiebreakers
+                </button>
+                <button
+                  id="void-tiebreaker"
+                  type="button"
+                  class="danger"
+                  hidden
+                >
+                  Void latest tiebreaker series
+                </button>
+                <button id="export-finals" type="button">
+                  Export finals CSV
+                </button>
+                <button id="clear-finals" type="button" class="danger" hidden>
+                  Discard unplayed finals
+                </button>
+              </div>
+              <details id="finals-withdraw">
+                <summary>Withdraw a finals team</summary>
+                <p class="rules-note">
+                  Available before that alliance plays and before any
+                  tiebreaker. The next available qualification-ranked team
+                  replaces it; if none remain, its partner plays alone.
+                </p>
+                <div id="finals-withdrawals"></div>
+              </details>
+            </div>
+          </div>
+        </aside>
+        <section class="field-control">
+          <div id="match-empty" class="empty">No matches scheduled.</div>
+          <div id="match-workspace" hidden>
+            <div class="flow-bar">
+              <span class="flow-step-label" id="flow-step-label">Timer</span>
+              <button id="flow-exit" type="button">
+                Exit full screen &times;
+              </button>
+            </div>
+            <div class="section-heading">
+              <h2 id="current-match">Qualification 1</h2>
+              <span id="match-status" class="status-pill">Ready</span>
+            </div>
+            <div id="alliance" class="alliance"></div>
+            <div class="timer-stage" id="timer-stage">
+              <div class="timer-label" id="timer-label">READY FOR MATCH</div>
+              <div class="timer-dial" id="timer-dial">
+                <output
+                  id="timer"
+                  aria-label="Seconds remaining"
+                  data-game-clock
+                >
+                  01:00
+                </output>
+                <button
+                  class="timer-sound-toggle"
+                  type="button"
+                  aria-label="Timer sound"
+                  aria-pressed="true"
+                  title="Disable timer sound"
+                >
+                  <svg
+                    class="sound-icon-on"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                    <path
+                      d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"
+                    /></svg
+                  ><svg
+                    class="sound-icon-off"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    hidden
+                  >
+                    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                    <path d="m16 9 5 6m0-6-5 6" />
+                  </svg>
+                </button>
+              </div>
+              <div class="timer-actions">
+                <button id="start-timer" class="primary">Start match</button>
+                <button id="reset-timer">Reset timer</button>
+                <button id="flow-score" type="button" class="flow-only">
+                  Score match &#8594;
+                </button>
+                <button
+                  id="fullscreen"
+                  title="Full-screen match flow"
+                  aria-label="Full-screen match flow"
+                >
+                  &#x26F6;
+                </button>
+              </div>
+            </div>
+            <div id="finals-stop-field" hidden>
+              <label>
+                Match Stop Time (seconds remaining)
+                <input
+                  id="finals-stop-time"
+                  type="number"
+                  min="0"
+                  max="60"
+                  data-game-seconds
+                  step="1"
+                  value="0"
+                  required
+                />
+              </label>
+              <button id="end-finals-early" type="button">
+                End tiebreaker early
+              </button>
+              <p class="rules-note">
+                In a tiebreaker, enter the time shown when both controllers are
+                on the ground. Pausing the timer does not save this time.
+              </p>
+            </div>
+            <form id="score-form">
+              <div class="section-heading">
+                <h2>Field score</h2>
+                <div class="score-tools">
+                  <span id="bag-total">0 / 38 bags</span>
+                  <button
+                    id="reset-score"
+                    type="button"
+                    title="Reset field score"
+                    aria-label="Reset field score"
+                  >
+                    &#8634;
+                  </button>
+                </div>
+              </div>
+              <div class="score-total">
+                <span>Alliance total</span>
+                <output id="score-total" aria-live="polite">0</output>
+                <span>POINTS</span>
+              </div>
+              <div id="scoring-inputs" class="score-calculator"></div>
+              <div id="team-statuses" class="team-statuses"></div>
+              <div class="score-actions">
+                <button id="flow-back" type="button" class="flow-only">
+                  &#8592; Back to timer
+                </button>
+                <button class="primary" id="save-score" type="submit">
+                  Post score
+                </button>
+                <button id="clear-result" type="button" class="danger" hidden>
+                  Remove result
+                </button>
+                <button id="next-match" type="button">
+                  Next unscored match &#8594;
+                </button>
+                <button id="flow-next" type="button" class="primary flow-only">
+                  Post &amp; next match &#8594;
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+        <aside class="live-standings">
+          <div class="section-heading">
+            <h2>Live standings</h2>
+            <span class="live-dot">LIVE</span>
+          </div>
+          <div id="mini-standings"></div>
+        </aside>
+      </section>
+      <!-- Teamwork and cumulative rankings. -->
+      <section id="rankings-view" class="view" hidden>
+        <h2>Teamwork leaderboard</h2>
+        <section id="finals-rankings" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACTIVE EVENT</p>
+              <h3>Finals results</h3>
+            </div>
+            <button id="open-finals" type="button">
+              Open in Match control
+            </button>
+          </div>
+          <p id="finals-ranking-status" role="status"></p>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Place</th>
+                  <th>Seed</th>
+                  <th>Alliance</th>
+                  <th>Finals score</th>
+                  <th>Tiebreaker 1 (score / Stop Time)</th>
+                  <th>Tiebreaker 2 (score / Stop Time)</th>
+                </tr>
+              </thead>
+              <tbody id="finals-ranking-rows"></tbody>
+            </table>
+          </div>
+          <p class="rules-note">
+            <span data-game-name>Level Up</span>
+            <span data-game-rule-label="finals">T12-T14</span>
+            : If teams tie for first, they play an extra match called a
+            tiebreaker. If they tie again, they play one more. If they still
+            tie, the higher seed wins. Other ties go to the higher seed. A
+            disqualification gives the whole pair 0 points. Results are not
+            final until all needed matches are played.
+          </p>
+        </section>
+        <section id="qualification-rankings" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACTIVE EVENT</p>
+              <h3>Current qualification rankings</h3>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Team</th>
+                  <th>Name</th>
+                  <th>Played</th>
+                  <th>Dropped</th>
+                  <th>Average</th>
+                  <th>Score history</th>
+                </tr>
+              </thead>
+              <tbody id="standings"></tbody>
+            </table>
+          </div>
+          <p class="rules-note">
+            After 4, 8, 12, and 16 matches, leave out each team’s lowest 1, 2,
+            3, or 4 scores. A no-show score is never left out. An extra match
+            marked * does not count toward that team’s average. If teams tie,
+            compare them again after leaving out their next-lowest scores. If
+            they are still tied, use the saved draw.
+          </p>
+        </section>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">EVENTS AND PRACTICE / ALL TIME</p>
+            <h3>All-time team rankings</h3>
+          </div>
+        </div>
+        <p class="rules-note">
+          Each team’s best Teamwork score from events and coach-run practice is
+          used. Extra appearances are included. Teams with the same best score
+          share a rank. This score belongs to the whole pair, not one robot.
+          Only scores from the robot marked Current count.
+        </p>
+        <p class="rules-note">
+          Tied best scores show the earliest known date among surviving results.
+          Unknown means the date was not recorded; -- means no result.
+        </p>
+        <p class="rules-note">
+          Unpromoted student-entered practice / quick runs are excluded from
+          rankings. Coaches can promote saved runs from the Practice tab.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Team</th>
+                <th>Name</th>
+                <th>Best score</th>
+                <th>Best-score date (local)</th>
+                <th>Recorded matches</th>
+              </tr>
+            </thead>
+            <tbody id="teamwork-all-time"></tbody>
+          </table>
+        </div>
+      </section>
+      <!-- Skills attempt entry and timer. -->
+      <section id="skills-view" class="view skills-layout" hidden>
+        <aside class="skills-settings">
+          <div class="section-heading">
+            <h2>Teams</h2>
+            <span id="skills-team-count">0</span>
+          </div>
+          <label class="skills-check">
+            <input id="skills-only" type="checkbox" />
+            Skills-only event
+          </label>
+          <div id="skills-team-list" aria-label="Skills teams"></div>
+          <a
+            data-game-rule="skills"
+            href="https://manuals.vex.com/iq/level-up/v2.1/event/#t17"
+            target="_blank"
+            rel="noopener"
+          >
+            Skills ranking rules
+            <span data-game-rule-label="skills">T17</span>
+            &#8599;
+          </a>
+        </aside>
+        <section class="skills-entry">
+          <p id="skills-empty" class="empty">No teams registered.</p>
+          <div id="skills-workspace" hidden>
+            <div id="skills-flow-bar" class="skills-flow-bar">
+              <span id="skills-flow-label">Skills run</span>
+              <button id="skills-flow-exit" type="button">
+                Exit full screen &times;
+              </button>
+            </div>
+            <div id="skills-selected-header" class="section-heading">
+              <div id="skills-selected-team" class="alliance-team"></div>
+              <span id="skills-progress">0 / 6 recorded</span>
+            </div>
+            <p id="skills-eligibility" class="skills-eligibility">
+              Qualification participation required
+            </p>
+            <div id="skills-attempt-log"></div>
+            <div id="skills-attempt-header" class="section-heading">
+              <h2 id="skills-heading">Driver / Attempt 1</h2>
+              <span id="skills-posted" class="status-pill">Unrecorded</span>
+            </div>
+            <div id="skills-timer-stage" class="timer-stage skills-clock">
+              <div id="skills-timer-label" class="timer-label">
+                READY FOR SKILLS
+              </div>
+              <div class="timer-dial" id="skills-timer-dial">
+                <output
+                  id="skills-timer"
+                  aria-label="Skills seconds remaining"
+                  data-game-clock
+                >
+                  01:00
+                </output>
+                <button
+                  class="timer-sound-toggle"
+                  type="button"
+                  aria-label="Timer sound"
+                  aria-pressed="true"
+                  title="Disable timer sound"
+                >
+                  <svg
+                    class="sound-icon-on"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                    <path
+                      d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"
+                    /></svg
+                  ><svg
+                    class="sound-icon-off"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    hidden
+                  >
+                    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                    <path d="m16 9 5 6m0-6-5 6" />
+                  </svg>
+                </button>
+              </div>
+              <div
+                id="skills-run-controls"
+                class="run-transport"
+                data-state="ready"
+              >
+                <button
+                  id="reset-skills-timer"
+                  class="run-control run-control-left"
+                  type="button"
+                  aria-label="Reset timer"
+                  title="Reset timer"
+                  hidden
+                >
+                  <svg
+                    class="run-reset-icon"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M3 11a9 9 0 1 1 2.64 6.36L3 15" />
+                    <path d="M3 20v-5h5" /></svg
+                  ><svg
+                    class="run-cancel-icon"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                  >
+                    <path d="m6 6 12 12M18 6 6 18" />
+                  </svg>
+                </button>
+                <button
+                  id="start-skills"
+                  class="run-control run-control-play"
+                  type="button"
+                  aria-label="Start run"
+                  title="Start run"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path
+                      d="M7 4.5a1 1 0 0 1 1.5-.86l11 6.35a1 1 0 0 1 0 1.74l-11 6.35A1 1 0 0 1 7 17.22Z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  id="pause-skills"
+                  class="run-control run-control-left"
+                  type="button"
+                  aria-label="Pause run"
+                  title="Pause run"
+                  hidden
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M7 5h4v14H7zM15 5h4v14h-4z" />
+                  </svg>
+                </button>
+                <button
+                  id="stop-skills"
+                  class="run-control run-control-right"
+                  type="button"
+                  aria-label="Stop run"
+                  title="Stop run"
+                  hidden
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M6 6h12v12H6z" />
+                  </svg>
+                </button>
+              </div>
+              <div class="timer-actions">
+                <button id="start-skills-end" type="button" hidden></button>
+              </div>
+            </div>
+            <form id="skills-form">
+              <div class="skills-result-fields">
+                <label class="skills-check">
+                  <input id="skills-opt-in" type="checkbox" />
+                  Stop time agreed before match
+                </label>
+                <label>
+                  Stop time (seconds remaining)
+                  <input
+                    id="skills-stop-time"
+                    type="number"
+                    min="0"
+                    max="60"
+                    data-game-seconds
+                    step="1"
+                    value="0"
+                    required
+                    disabled
+                  />
+                </label>
+                <label>
+                  Result
+                  <select id="skills-status">
+                    <option value="ok">Regular score</option>
+                    <option value="dq">Disqualified (0)</option>
+                    <option value="forfeit">Forfeited (0)</option>
+                  </select>
+                </label>
+              </div>
+              <div class="section-heading">
+                <h2>Field score</h2>
+                <div class="score-tools">
+                  <span id="skills-bag-total">0 / 38 bags</span>
+                  <button
+                    id="reset-skills-score"
+                    type="button"
+                    title="Reset skills field score"
+                    aria-label="Reset skills field score"
+                  >
+                    &#8634;
+                  </button>
+                </div>
+              </div>
+              <div class="score-total">
+                <span>Skills score</span>
+                <output id="skills-score-total" aria-live="polite">0</output>
+                <span>POINTS</span>
+              </div>
+              <div id="skills-scoring-inputs" class="score-calculator"></div>
+              <div class="score-actions">
+                <button id="save-skills" class="primary" type="submit">
+                  Post skills score
+                </button>
+                <button id="void-skills" type="button" class="danger" hidden>
+                  Void attempt
+                </button>
+                <button id="next-skills" type="button">
+                  Next unused attempt &#8594;
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+        <aside
+          class="live-standings skills-live-standings"
+          aria-label="Skills live standings"
+        >
+          <div class="section-heading">
+            <h2>Live standings</h2>
+            <span class="live-dot">LIVE</span>
+          </div>
+          <div id="skills-mini-standings"></div>
+        </aside>
+      </section>
+      <!-- All-time Skills standings and export. -->
+      <section id="skills-rankings-view" class="view skills-rankings" hidden>
+        <h2>Skills leaderboard</h2>
+        <section id="skills-event-rankings" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACTIVE EVENT</p>
+              <h3>Current skills rankings</h3>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Team</th>
+                  <th>Best driver</th>
+                  <th>Best autonomous</th>
+                  <th>Total</th>
+                  <th>Driver attempts</th>
+                  <th>Autonomous attempts</th>
+                  <th>
+                    Best-run stop times
+                    <br />
+                    Driver / Autonomous
+                  </th>
+                  <th>Qualification</th>
+                </tr>
+              </thead>
+              <tbody id="skills-standings"></tbody>
+            </table>
+          </div>
+          <p class="rules-note">
+            Each team gets 3 Driver runs and 3 Autonomous runs. In an Autonomous
+            run, the robot works without a driver. A team’s total is its best
+            Driver score plus its best Autonomous score. If teams tie, the
+            official rules compare their other run scores and Stop Times in
+            order. Teams need a regular match to be ranked, unless the event is
+            Skills-only.
+          </p>
+          <details class="rules-note">
+            <summary>Full Skills tie-break order</summary>
+            <ol>
+              <li>Best Driver plus best Autonomous total</li>
+              <li>Best Autonomous score</li>
+              <li>Second Autonomous score</li>
+              <li>Second Driver score</li>
+              <li>Sum of the best-run Stop Times</li>
+              <li>Best Autonomous Stop Time</li>
+              <li>Third Autonomous score</li>
+              <li>Third Driver score</li>
+              <li>Best Autonomous L4, L3, and L2 points</li>
+              <li>Best Driver L4, L3, and L2 points</li>
+            </ol>
+          </details>
+        </section>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">EVENTS AND PRACTICE / ALL TIME</p>
+            <h3>All-time team rankings</h3>
+          </div>
+        </div>
+        <p class="rules-note">
+          Each team’s total is its best Driver score plus its best Autonomous
+          score from saved events and coach-run practice. These runs can come
+          from different sessions. Teams with the same total share a rank. Teams
+          with no saved attempts are unranked. Only scores from the robot marked
+          Current count.
+        </p>
+        <p class="rules-note">
+          If the same top score was earned more than once, the table shows its
+          earliest known date. “Unknown” means no date was saved. “--” means
+          there is no attempt in that mode.
+        </p>
+        <p class="rules-note">
+          Unpromoted student-entered practice / quick runs are excluded from
+          rankings. Coaches can promote saved runs from the Practice tab.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Team</th>
+                <th>Name</th>
+                <th>Best driver</th>
+                <th>Driver date (local)</th>
+                <th>Best autonomous</th>
+                <th>Autonomous date (local)</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="skills-all-time"></tbody>
+          </table>
+        </div>
+      </section>
+      <!-- Team-level history, standings links, and performance analysis. -->
+      <section id="analysis-view" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ALL SAVED SESSIONS / COACHING</p>
+            <h2>Cumulative leaderboard</h2>
+          </div>
+        </div>
+        <p class="rules-note">
+          Unpromoted student-entered practice / quick runs do not affect
+          leaderboard scores or leaders used for weighting. They remain included
+          in team details, trends, and robot comparisons for analysis. Coaches
+          can promote saved runs from the Practice tab. Older runs without a
+          saved role remain eligible.
+        </p>
+        <label>
+          Result source
+          <select id="analysis-source">
+            <option value="all">All results</option>
+            <option value="event">Events only</option>
+            <option value="practice">Practice only</option>
+          </select>
+        </label>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="rank"
+                    title="Sort by Rank; click again to reverse"
+                  >
+                    Rank
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="id"
+                    title="Sort by Team; click again to reverse"
+                  >
+                    Team
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="name"
+                    title="Sort by Name; click again to reverse"
+                  >
+                    Name
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="skillsPoints"
+                    title="Sort by Skills / 25; click again to reverse"
+                  >
+                    Skills / 25
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="teamworkPoints"
+                    title="Sort by Teamwork / 25; click again to reverse"
+                  >
+                    Teamwork / 25
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="notebookPoints"
+                    title="Sort by Notebook / 40; click again to reverse"
+                  >
+                    Notebook / 40
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="interviewPoints"
+                    title="Sort by Interview / 10; click again to reverse"
+                  >
+                    Interview / 10
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="total"
+                    title="Sort by Total / 100; click again to reverse"
+                  >
+                    Total / 100
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    class="roster-sort-button"
+                    data-analysis-sort="missing"
+                    title="Sort by Data completeness; click again to reverse"
+                  >
+                    Data completeness
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="analysis-rows"></tbody>
+          </table>
+        </div>
+        <p class="rules-note">
+          Your team can earn up to 100 points: up to 25 for Skills, 25 for
+          Teamwork, 40 for Notebook, and 10 for Interview. Skills and Teamwork
+          points use a curve: points still rise with scores, but one unusually
+          high score has less effect on other teams. The top team gets 25
+          points; a score of 0 gets 0. Notebook and Interview use the latest
+          coach scores. Student reviews do not count. Missing scores add 0. The
+          Events/Practice filter changes Skills and Teamwork only. Rankings can
+          change when team scores change.
+        </p>
+        <details class="rules-note">
+          <summary>How scores are calculated</summary>
+          <p>
+            Skills and Teamwork use separate top scores. For either category:
+            points = 25 × ln(1 + your score) ÷ ln(1 + the top score). If every
+            team scores 0, everyone gets 0. For example, with a top score of
+            150, a score of 50 earns about 19.6 of 25 points instead of 8.3.
+          </p>
+          <p>
+            Teamwork uses each team’s best status-adjusted score.
+            Disqualifications and no-shows count as 0. Skills uses each team’s
+            best Driver plus best Autonomous score.
+          </p>
+          <p>
+            Notebook points use the latest coach score for each criterion, out
+            of 64. Interview points use the latest coach score for each
+            criterion, out of 12. Student reviews do not count.
+          </p>
+          <p>
+            Only scores from the robot marked Current count for Skills and
+            Teamwork. These are shared team scores, not individual robot scores.
+            This is a coaching comparison, not official event standings or an
+            award decision.
+          </p>
+        </details>
+        <section id="v5-analysis-controls" hidden>
+          <p class="rules-note">
+            Practice analysis only. Scrimmage metrics are calculated from saved
+            four-team practice runs, not official event standings.
+          </p>
+          <label>
+            Team
+            <select id="v5-analysis-team"></select>
+          </label>
+          <p id="v5-analysis-empty" class="empty" hidden>
+            Add teams to view practice analysis.
+          </p>
+        </section>
+        <section
+          id="team-analysis"
+          hidden
+          aria-labelledby="team-analysis-heading"
+        >
+          <div class="section-heading team-analysis-header">
+            <div class="team-analysis-identity">
+              <div class="team-analysis-title-line">
+                <h2 id="team-analysis-heading" tabindex="-1"></h2>
+                <span
+                  id="team-analysis-team-id"
+                  class="team-analysis-team-id"
+                  hidden
+                ></span>
+              </div>
+            </div>
+            <button id="close-team-analysis" type="button">
+              Close team details
+            </button>
+          </div>
+          <div id="team-profile-row" class="team-profile-row" hidden>
+            <a id="team-profile" target="_blank" rel="noopener">
+              Official VEX team profile
+            </a>
+          </div>
+          <label id="team-analysis-robot-field" hidden>
+            Robot version
+            <select id="team-analysis-robot"></select>
+          </label>
+          <section id="team-robot-comparison" hidden>
+            <h3>Robot comparison</h3>
+            <p class="rules-note">
+              Each version uses the selected result source. Results belong to
+              the robot in use when they were first posted (practice: entered
+              run time); results with unknown dates count as the original robot.
+              Skills best = best Driver + best Autonomous for that robot.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th rowspan="2">Robot</th>
+                    <th rowspan="2">Started (local)</th>
+                    <th colspan="3">Teamwork</th>
+                    <th colspan="3">Driver skills</th>
+                    <th colspan="3">Autonomous skills</th>
+                    <th rowspan="2">Skills best</th>
+                  </tr>
+                  <tr>
+                    <th>Runs</th>
+                    <th>High</th>
+                    <th>Average</th>
+                    <th>Runs</th>
+                    <th>High</th>
+                    <th>Average</th>
+                    <th>Runs</th>
+                    <th>High</th>
+                    <th>Average</th>
+                  </tr>
+                </thead>
+                <tbody id="team-robot-rows"></tbody>
+              </table>
+            </div>
+            <h3>Selected robot details</h3>
+          </section>
+          <section id="official-standings" hidden>
+            <h3>Official World Skills standings</h3>
+            <p class="rules-note">
+              Ohio
+              <span id="official-standings-grade">Middle School</span>
+              standings, captured
+              <time id="official-standings-captured"></time>
+              .
+              <a id="official-standings-source" target="_blank" rel="noopener">
+                Open official standings
+              </a>
+            </p>
+            <p id="official-standings-status" class="rules-note" role="status">
+              Official standings refresh when Analysis opens; the shared app
+              caches results for up to 5 minutes.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ohio rank (row)</th>
+                    <th>World rank</th>
+                    <th>Score</th>
+                    <th>Autonomous Coding Skills</th>
+                    <th>Driver Skills</th>
+                    <th>Highest Autonomous Coding Skills</th>
+                    <th>Highest Driver Skills</th>
+                  </tr>
+                </thead>
+                <tbody id="official-standings-row"></tbody>
+              </table>
+            </div>
+          </section>
+          <div
+            id="team-analysis-saved-heading"
+            class="section-heading team-analysis-saved-heading"
+          >
+            <div>
+              <p class="eyebrow">LOCAL PRACTICE / ALL SAVED SESSIONS</p>
+              <h3>Saved run analysis</h3>
+            </div>
+          </div>
+          <p class="rules-note">
+            All saved sessions. Alliance scores are shared, not individual
+            contributions.
+          </p>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mode</th>
+                  <th>Runs</th>
+                  <th>Current level</th>
+                  <th>Improvement</th>
+                  <th>Recent best</th>
+                  <th>Personal best / date (local)</th>
+                  <th>DQ</th>
+                </tr>
+              </thead>
+              <tbody id="team-analysis-summary"></tbody>
+            </table>
+          </div>
+          <section id="v5-match-analysis" hidden>
+            <h3>Practice scrimmage metrics</h3>
+            <p class="rules-note">
+              WP: 2 for a win, 1 for a tie. AP counts the saved Override
+              Autonomous Bonus, not phase-by-phase autonomous score. SP is the
+              sum of opponent alliance scores. OPR, DPR, and CCWM are
+              least-squares estimates from these scrimmages, not official event
+              rankings.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Matches</th>
+                    <th>W-T-L</th>
+                    <th>WP</th>
+                    <th>AP</th>
+                    <th>SP</th>
+                    <th>
+                      Score for
+                      <br />
+                      High / Avg
+                    </th>
+                    <th>
+                      Against
+                      <br />
+                      Avg
+                    </th>
+                    <th>
+                      Margin
+                      <br />
+                      Avg
+                    </th>
+                    <th>OPR</th>
+                    <th>DPR</th>
+                    <th>CCWM</th>
+                  </tr>
+                </thead>
+                <tbody id="v5-scrimmage-metrics"></tbody>
+              </table>
+            </div>
+            <p id="v5-rating-note" class="rules-note" hidden>
+              Not enough distinct alliance pairings to estimate OPR, DPR, and
+              CCWM yet.
+            </p>
+          </section>
+          <h3>Score trends</h3>
+          <p class="rules-note">
+            These numbers use the selected event source and robot. “Current” is
+            selected by default. Current level is the average score from the
+            last 5 dated runs, or fewer if there are not 5. Improvement compares
+            it with the average of up to 5 earlier runs. It can go up or down.
+            Recent best is the highest score among the latest runs. Personal
+            best is the highest score across all saved runs, with the earliest
+            known date.
+          </p>
+          <p class="rules-note">
+            Charts show the latest 30 dated runs. The thick line shows an
+            average of up to 5 runs, including runs before the chart. Runs
+            without dates count in totals and Personal best, but not in Current
+            level, Improvement, or charts. Unpromoted student practice runs
+            appear in analysis without affecting leaderboards. A score
+            correction can change its saved date.
+          </p>
+          <div id="team-analysis-trends"></div>
+          <h3 id="team-analysis-partners-heading">Teamwork by partner</h3>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Partner</th>
+                  <th>Matches</th>
+                  <th>Your high</th>
+                  <th>Your average</th>
+                  <th>Alliance high</th>
+                  <th>Alliance average</th>
+                  <th>Your DQ</th>
+                </tr>
+              </thead>
+              <tbody id="team-analysis-partners"></tbody>
+            </table>
+          </div>
+          <h3>Results by session</h3>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Event / Session</th>
+                  <th>Mode</th>
+                  <th>Runs</th>
+                  <th>High</th>
+                  <th>Average</th>
+                </tr>
+              </thead>
+              <tbody id="team-analysis-sessions"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+      <!-- Standalone practice runs and saved-run history. Game field UI is mounted in practice-scoring-inputs. -->
+      <section id="practice-view" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">STANDALONE / NO EVENT REQUIRED</p>
+            <h2>Practice / Quick Run</h2>
+          </div>
+          <button id="new-practice" type="button">Next run</button>
+        </div>
+        <p id="practice-intro-note" class="rules-note">
+          Student runs start out unranked. Coaches can promote a saved run to
+          coach leaderboards; the original student entry remains in score
+          history.
+        </p>
+        <form id="practice-form">
+          <div class="flow-bar">
+            <span class="flow-step-label" id="practice-flow-label">
+              Practice run
+            </span>
+            <button id="practice-flow-exit" type="button">
+              Exit full screen &times;
+            </button>
+          </div>
+          <p
+            id="practice-ranking-note"
+            class="rules-note"
+            aria-live="polite"
+          ></p>
+          <div class="practice-flow-body">
+            <div class="practice-run-panel">
+              <div class="practice-fields">
+                <label>
+                  Run type
+                  <select id="practice-mode">
+                    <option value="driver">Driver skills</option>
+                    <option value="autonomous">Autonomous skills</option>
+                    <option value="teamwork">Teamwork</option>
+                  </select>
+                </label>
+                <label id="practice-team-field">
+                  Team
+                  <select id="practice-team" required></select>
+                </label>
+                <label id="practice-partner-field" hidden>
+                  Partner
+                  <select id="practice-partner"></select>
+                </label>
+                <div
+                  id="practice-blue-alliance-fields"
+                  class="practice-extra-team-fields"
+                  hidden
+                >
+                  <label>
+                    Blue team
+                    <select id="practice-blue-team"></select>
+                  </label>
+                  <label>
+                    Blue partner
+                    <select id="practice-blue-partner"></select>
+                  </label>
+                </div>
+
+                <label id="practice-opt-in-field" class="skills-check">
+                  <input id="practice-opt-in" type="checkbox" />
+                  Stop time agreed before run
+                </label>
+                <label id="practice-stop-field">
+                  Stop time (seconds remaining)
+                  <input
+                    id="practice-stop"
+                    type="number"
+                    min="0"
+                    max="60"
+                    data-game-seconds
+                    step="1"
+                    value="0"
+                    required
+                    disabled
+                  />
+                </label>
+              </div>
+              <label id="practice-notes-field">
+                Notes
+                <textarea
+                  id="practice-notes"
+                  maxlength="1000"
+                  rows="2"
+                  placeholder="Setup, strategy, or changes tested"
+                ></textarea>
+              </label>
+              <div class="timer-stage" id="practice-timer-stage">
+                <div class="timer-label" id="practice-timer-label">
+                  READY FOR PRACTICE
+                </div>
+                <div class="timer-dial" id="practice-timer-dial">
+                  <output
+                    id="practice-timer"
+                    aria-label="Practice seconds remaining"
+                    data-game-clock
+                  >
+                    01:00
+                  </output>
+                  <button
+                    class="timer-sound-toggle"
+                    type="button"
+                    aria-label="Timer sound"
+                    aria-pressed="true"
+                    title="Disable timer sound"
+                  >
+                    <svg
+                      class="sound-icon-on"
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                      <path
+                        d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"
+                      /></svg
+                    ><svg
+                      class="sound-icon-off"
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      hidden
+                    >
+                      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                      <path d="m16 9 5 6m0-6-5 6" />
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  id="practice-run-controls"
+                  class="run-transport"
+                  data-state="ready"
+                >
+                  <button
+                    id="reset-practice-timer"
+                    class="run-control run-control-left"
+                    type="button"
+                    aria-label="Reset timer"
+                    title="Reset timer"
+                    hidden
+                  >
+                    <svg
+                      class="run-reset-icon"
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M3 11a9 9 0 1 1 2.64 6.36L3 15" />
+                      <path d="M3 20v-5h5" /></svg
+                    ><svg
+                      class="run-cancel-icon"
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                    >
+                      <path d="m6 6 12 12M18 6 6 18" />
+                    </svg>
+                  </button>
+                  <button
+                    id="start-practice"
+                    type="button"
+                    class="run-control run-control-play"
+                    aria-label="Start run"
+                    title="Start run"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                      <path
+                        d="M7 4.5a1 1 0 0 1 1.5-.86l11 6.35a1 1 0 0 1 0 1.74l-11 6.35A1 1 0 0 1 7 17.22Z"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    id="pause-practice"
+                    class="run-control run-control-left"
+                    type="button"
+                    aria-label="Pause run"
+                    title="Pause run"
+                    hidden
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                      <path d="M7 5h4v14H7zM15 5h4v14h-4z" />
+                    </svg>
+                  </button>
+                  <button
+                    id="stop-practice"
+                    class="run-control run-control-right"
+                    type="button"
+                    aria-label="Stop run"
+                    title="Stop run"
+                    hidden
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                      <path d="M6 6h12v12H6z" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="timer-actions">
+                  <button
+                    id="practice-fullscreen"
+                    type="button"
+                    title="Full-screen practice"
+                    aria-label="Full-screen practice"
+                  >
+                    &#x26F6;
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="practice-score-panel">
+              <div class="section-heading">
+                <h2>Field score</h2>
+                <span id="practice-bag-total">0 / 38 bags</span>
+              </div>
+              <div class="score-total">
+                <span id="practice-score-label">Skills score</span>
+                <output id="practice-score-total" aria-live="polite">0</output>
+                <span>POINTS</span>
+              </div>
+              <div id="practice-scoring-inputs" class="score-calculator"></div>
+            </div>
+          </div>
+          <div class="score-actions">
+            <button id="save-practice" type="submit" class="primary">
+              Save practice run
+            </button>
+            <button id="new-practice-bottom" type="button">Next run</button>
+            <button id="cancel-practice-edit" type="button" hidden>
+              Cancel edit
+            </button>
+            <button id="remove-practice" type="button" class="danger" hidden>
+              Remove practice run
+            </button>
+            <button
+              id="practice-flow-next"
+              type="button"
+              class="primary flow-only"
+            >
+              Post &amp; next run &#8594;
+            </button>
+          </div>
         </form>
-      </div></section>
-      <aside class="live-standings skills-live-standings" aria-label="Skills live standings"><div class="section-heading"><h2>Live standings</h2><span class="live-dot">LIVE</span></div><div id="skills-mini-standings"></div></aside>
-    </section>
-    <section id="skills-rankings-view" class="view skills-rankings" hidden>
-      <h2>Skills leaderboard</h2>
-      <section id="skills-event-rankings" hidden>
-        <div class="section-heading"><div><p class="eyebrow">ACTIVE EVENT</p><h3>Current skills rankings</h3></div></div>
-        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Team</th><th>Best driver</th><th>Best autonomous</th><th>Total</th><th>Driver attempts</th><th>Autonomous attempts</th><th>Best-run stop times<br>Driver / Autonomous</th><th>Qualification</th></tr></thead><tbody id="skills-standings"></tbody></table></div>
-        <p class="rules-note">Each team gets 3 Driver runs and 3 Autonomous runs. In an Autonomous run, the robot works without a driver. A team’s total is its best Driver score plus its best Autonomous score. If teams tie, the official rules compare their other run scores and Stop Times in order. Teams need a regular match to be ranked, unless the event is Skills-only.</p>
-        <details class="rules-note"><summary>Full Skills tie-break order</summary><ol><li>Best Driver plus best Autonomous total</li><li>Best Autonomous score</li><li>Second Autonomous score</li><li>Second Driver score</li><li>Sum of the best-run Stop Times</li><li>Best Autonomous Stop Time</li><li>Third Autonomous score</li><li>Third Driver score</li><li>Best Autonomous L4, L3, and L2 points</li><li>Best Driver L4, L3, and L2 points</li></ol></details>
+        <div class="practice-runs-heading">
+          <h3>Saved practice runs</h3>
+          <label>
+            Show
+            <select id="practice-filter">
+              <option value="team" selected>Selected team</option>
+              <option value="all">All teams</option>
+            </select>
+          </label>
+        </div>
+        <p id="practice-history-note" class="rules-note">
+          Latest 100 current practice runs for the team selected above, or all
+          teams. Coaches can promote student runs to coach leaderboards; the
+          original student entry stays in score history. Select Edit to correct
+          a run, not to record another attempt.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Run time (local)</th>
+                <th>Type</th>
+                <th>Teams</th>
+                <th>Field score</th>
+                <th>Notes</th>
+                <th id="practice-actions-heading">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="practice-runs"></tbody>
+          </table>
+        </div>
       </section>
-      <div class="section-heading"><div><p class="eyebrow">EVENTS AND PRACTICE / ALL TIME</p><h3>All-time team rankings</h3></div></div>
-      <p class="rules-note">Each team’s total is its best Driver score plus its best Autonomous score from saved events and coach-run practice. These runs can come from different sessions. Teams with the same total share a rank. Teams with no saved attempts are unranked. Only scores from the robot marked Current count.</p>
-      <p class="rules-note">If the same top score was earned more than once, the table shows its earliest known date. “Unknown” means no date was saved. “--” means there is no attempt in that mode.</p>
-      <p class="rules-note">Unpromoted student-entered practice / quick runs are excluded from rankings. Coaches can promote saved runs from the Practice tab.</p>
-      <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Team</th><th>Name</th><th>Best driver</th><th>Driver date (local)</th><th>Best autonomous</th><th>Autonomous date (local)</th><th>Total</th></tr></thead><tbody id="skills-all-time"></tbody></table></div>
-    </section>
-    <section id="analysis-view" class="view" hidden>
-      <div class="section-heading"><div><p class="eyebrow">ALL SAVED SESSIONS / COACHING</p><h2>Cumulative leaderboard</h2></div></div>
-      <p class="rules-note">Unpromoted student-entered practice / quick runs do not affect leaderboard scores or leaders used for weighting. They remain included in team details, trends, and robot comparisons for analysis. Coaches can promote saved runs from the Practice tab. Older runs without a saved role remain eligible.</p>
-      <label>Result source<select id="analysis-source"><option value="all">All results</option><option value="event">Events only</option><option value="practice">Practice only</option></select></label>
-      <div class="table-scroll"><table><thead><tr><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="rank" title="Sort by Rank; click again to reverse">Rank<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="id" title="Sort by Team; click again to reverse">Team<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="name" title="Sort by Name; click again to reverse">Name<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="skillsPoints" title="Sort by Skills / 25; click again to reverse">Skills / 25<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="teamworkPoints" title="Sort by Teamwork / 25; click again to reverse">Teamwork / 25<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="notebookPoints" title="Sort by Notebook / 40; click again to reverse">Notebook / 40<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="interviewPoints" title="Sort by Interview / 10; click again to reverse">Interview / 10<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="total" title="Sort by Total / 100; click again to reverse">Total / 100<span class="sort-indicator" aria-hidden="true"></span></button></th><th scope="col" aria-sort="none"><button type="button" class="roster-sort-button" data-analysis-sort="missing" title="Sort by Data completeness; click again to reverse">Data completeness<span class="sort-indicator" aria-hidden="true"></span></button></th></tr></thead><tbody id="analysis-rows"></tbody></table></div>
-      <p class="rules-note">Your team can earn up to 100 points: up to 25 for Skills, 25 for Teamwork, 40 for Notebook, and 10 for Interview. Skills and Teamwork points use a curve: points still rise with scores, but one unusually high score has less effect on other teams. The top team gets 25 points; a score of 0 gets 0. Notebook and Interview use the latest coach scores. Student reviews do not count. Missing scores add 0. The Events/Practice filter changes Skills and Teamwork only. Rankings can change when team scores change.</p>
-      <details class="rules-note"><summary>How scores are calculated</summary><p>Skills and Teamwork use separate top scores. For either category: points = 25 × ln(1 + your score) ÷ ln(1 + the top score). If every team scores 0, everyone gets 0. For example, with a top score of 150, a score of 50 earns about 19.6 of 25 points instead of 8.3.</p><p>Teamwork uses each team’s best status-adjusted score. Disqualifications and no-shows count as 0. Skills uses each team’s best Driver plus best Autonomous score.</p><p>Notebook points use the latest coach score for each criterion, out of 64. Interview points use the latest coach score for each criterion, out of 12. Student reviews do not count.</p><p>Only scores from the robot marked Current count for Skills and Teamwork. These are shared team scores, not individual robot scores. This is a coaching comparison, not official event standings or an award decision.</p></details>
-      <section id="team-analysis" hidden aria-labelledby="team-analysis-heading">
-        <div class="section-heading"><h2 id="team-analysis-heading" tabindex="-1"></h2><button id="close-team-analysis" type="button">Close team details</button></div>
-        <label id="team-analysis-robot-field" hidden>Robot version<select id="team-analysis-robot"></select></label>
-        <section id="team-robot-comparison" hidden><h3>Robot comparison</h3><p class="rules-note">Each version uses the selected result source. Results belong to the robot in use when they were first posted (practice: entered run time); results with unknown dates count as the original robot. Skills best = best Driver + best Autonomous for that robot.</p><div class="table-scroll"><table><thead><tr><th rowspan="2">Robot</th><th rowspan="2">Started (local)</th><th colspan="3">Teamwork</th><th colspan="3">Driver skills</th><th colspan="3">Autonomous skills</th><th rowspan="2">Skills best</th></tr><tr><th>Runs</th><th>High</th><th>Average</th><th>Runs</th><th>High</th><th>Average</th><th>Runs</th><th>High</th><th>Average</th></tr></thead><tbody id="team-robot-rows"></tbody></table></div><h3>Selected robot details</h3></section>
-        <p class="rules-note">All saved sessions. Alliance scores are shared, not individual contributions.</p>
-        <div class="table-scroll"><table><thead><tr><th>Mode</th><th>Runs</th><th>Current level</th><th>Improvement</th><th>Recent best</th><th>Personal best / date (local)</th><th>DQ</th></tr></thead><tbody id="team-analysis-summary"></tbody></table></div>
-        <h3>Score trends</h3>
-        <p class="rules-note">These numbers use the selected event source and robot. “Current” is selected by default. Current level is the average score from the last 5 dated runs, or fewer if there are not 5. Improvement compares it with the average of up to 5 earlier runs. It can go up or down. Recent best is the highest score among the latest runs. Personal best is the highest score across all saved runs, with the earliest known date.</p>
-        <p class="rules-note">Charts show the latest 30 dated runs. The thick line shows an average of up to 5 runs, including runs before the chart. Runs without dates count in totals and Personal best, but not in Current level, Improvement, or charts. Unpromoted student practice runs appear in analysis without affecting leaderboards. A score correction can change its saved date.</p>
-        <div id="team-analysis-trends"></div>
-        <h3>Teamwork by partner</h3>
-        <div class="table-scroll"><table><thead><tr><th>Partner</th><th>Matches</th><th>Your high</th><th>Your average</th><th>Alliance high</th><th>Alliance average</th><th>Your DQ</th></tr></thead><tbody id="team-analysis-partners"></tbody></table></div>
-        <h3>Results by session</h3>
-        <div class="table-scroll"><table><thead><tr><th>Event / Session</th><th>Mode</th><th>Runs</th><th>High</th><th>Average</th></tr></thead><tbody id="team-analysis-sessions"></tbody></table></div>
+      <!-- Engineering notebook review workflow. -->
+      <section id="rubric-view" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">COACHING / REVIEW HISTORY</p>
+            <h2>Engineering notebook rubric</h2>
+          </div>
+        </div>
+        <p class="rules-note">
+          Review tool. Only coach reviews update the current score and
+          Cumulative leaderboard, using the latest coach score for each
+          criterion. Team members can review any team and manage their own
+          student reviews. They can read feedback for their team and reviews
+          they wrote.
+        </p>
+        <details id="notebook-preparation" class="interview-preparation">
+          <summary>Preparing your notebook</summary>
+          <p>
+            Your notebook tells the story of how your team designed, tested, and
+            improved its solution throughout the season.
+          </p>
+          <ul>
+            <li>
+              Document everything you do with your robot. Take pictures as you
+              go.
+            </li>
+            <li>
+              Date and organize entries so your team and others can find them
+              later.
+            </li>
+            <li>
+              Show who contributed and give credit when you build on someone
+              else's ideas.
+            </li>
+            <li>
+              Record sketches, code, test steps, measurements, decisions, and
+              changes as you go.
+            </li>
+            <li>
+              Explain what happened, what you learned, and how that learning
+              shaped your next step.
+            </li>
+          </ul>
+        </details>
+        <div class="notebook-guidance-selector">
+          <label for="notebook-guidance-version">
+            Guidance version
+            <select id="notebook-guidance-version">
+              <option
+                value="official"
+                data-pdf="https://content.vexrobotics.com/kb/global-robotics/engineering-notebook-rubric-A4-v2.0.pdf"
+              >
+                Official rubric
+              </option>
+              <option
+                value="student"
+                data-pdf="https://content.vexrobotics.com/kb/global-robotics/student-friendly-engineering-notebook-rubric-a4-v2.0.pdf"
+              >
+                Student-friendly rubric
+              </option>
+            </select>
+          </label>
+          <a
+            id="notebook-guidance-link"
+            href="https://content.vexrobotics.com/kb/global-robotics/engineering-notebook-rubric-A4-v2.0.pdf"
+            target="_blank"
+            rel="noopener"
+          >
+            Open official rubric PDF
+          </a>
+        </div>
+        <label class="rubric-team-field">
+          Team
+          <select id="rubric-team"></select>
+        </label>
+        <p id="rubric-empty" class="empty">
+          Add teams in Teams &amp; schedule to start an evaluation.
+        </p>
+        <div id="rubric-team-history" hidden>
+          <p id="rubric-current" class="rubric-current" aria-live="polite"></p>
+          <div class="table-scroll">
+            <table>
+              <caption>Reviews for this team</caption>
+              <thead>
+                <tr>
+                  <th>Evaluation date</th>
+                  <th>Reviewer</th>
+                  <th>Points this review</th>
+                  <th>Criteria scored</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rubric-history-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <form id="rubric-form" hidden>
+          <div class="rubric-form-heading">
+            <h3 id="rubric-form-title">New review</h3>
+            <label class="rubric-evidence-notes-toggle">
+              <input type="checkbox" data-rubric-evidence-notes checked />
+              Review with notes
+            </label>
+          </div>
+          <div class="practice-fields">
+            <label>
+              Evaluation date
+              <input id="rubric-date" type="date" required />
+            </label>
+            <label>
+              Reviewer
+              <input
+                id="rubric-reviewer"
+                maxlength="80"
+                placeholder="Coach or reviewer name"
+              />
+            </label>
+          </div>
+          <div class="rubric-score-summary" aria-live="polite">
+            <strong id="rubric-total">0 / 64</strong>
+            <span id="rubric-completion">
+              0 / 16 criteria scored - incomplete
+            </span>
+            <span id="rubric-saved">No saved evaluation</span>
+          </div>
+          <div id="rubric-criteria"></div>
+          <label>
+            Overall feedback
+            <textarea id="rubric-overall" maxlength="4000" rows="3"></textarea>
+          </label>
+          <p class="rules-note">
+            Leave unassessed criteria as Not scored. Each assessed criterion
+            needs 1-4 points; zero is not a rubric rating. A review can cover
+            only some criteria; criteria left Not scored keep their earlier
+            score in the team's current result.
+          </p>
+          <div class="button-row">
+            <button id="save-rubric" type="submit" class="primary">
+              Save new review
+            </button>
+            <button id="cancel-rubric" type="button" hidden>Cancel edit</button>
+          </div>
+        </form>
+        <h3>All teams: current coach notebook results</h3>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Name</th>
+                <th>Latest review</th>
+                <th>Reviews</th>
+                <th>Current points / 64</th>
+                <th>Criteria scored</th>
+              </tr>
+            </thead>
+            <tbody id="rubric-rows"></tbody>
+          </table>
+        </div>
       </section>
-    </section>
-    <section id="practice-view" class="view" hidden>
-      <div class="section-heading"><div><p class="eyebrow">STANDALONE / NO EVENT REQUIRED</p><h2>Practice / Quick Run</h2></div><button id="new-practice" type="button">Next run</button></div>
-      <p class="rules-note">Student runs start out unranked. Coaches can promote a saved run to coach leaderboards; the original student entry remains in score history.</p>
-      <form id="practice-form">
-        <div class="flow-bar"><span class="flow-step-label" id="practice-flow-label">Practice run</span><button id="practice-flow-exit" type="button">Exit full screen &times;</button></div>
-        <p id="practice-ranking-note" class="rules-note" aria-live="polite"></p>
-        <div class="practice-flow-body"><div class="practice-run-panel">
-        <div class="practice-fields">
-          <label>Run type<select id="practice-mode"><option value="driver">Driver skills</option><option value="autonomous">Autonomous skills</option><option value="teamwork">Teamwork</option></select></label>
-          <label>Team<select id="practice-team" required></select></label>
-          <label id="practice-partner-field" hidden>Partner<select id="practice-partner"></select></label>
-          
-          <label id="practice-opt-in-field" class="skills-check"><input id="practice-opt-in" type="checkbox"> Stop time agreed before run</label>
-          <label id="practice-stop-field">Stop time (seconds remaining)<input id="practice-stop" type="number" min="0" max="60" data-game-seconds step="1" value="0" required disabled></label>
+      <!-- Student interview review workflow. -->
+      <section id="interview-view" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">COACHING / REVIEW HISTORY</p>
+            <h2>Team interview rubric</h2>
+          </div>
         </div>
-        <label id="practice-notes-field">Notes<textarea id="practice-notes" maxlength="1000" rows="2" placeholder="Setup, strategy, or changes tested"></textarea></label>
-        <div class="timer-stage" id="practice-timer-stage"><div class="timer-label" id="practice-timer-label">READY FOR PRACTICE</div><div class="timer-dial" id="practice-timer-dial"><output id="practice-timer" aria-label="Practice seconds remaining" data-game-clock>01:00</output><button class="timer-sound-toggle" type="button" aria-label="Timer sound" aria-pressed="true" title="Disable timer sound"><svg class="sound-icon-on" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg><svg class="sound-icon-off" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg></button></div><div id="practice-run-controls" class="run-transport" data-state="ready"><button id="reset-practice-timer" class="run-control run-control-left" type="button" aria-label="Reset timer" title="Reset timer" hidden><svg class="run-reset-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a9 9 0 1 1 2.64 6.36L3 15"/><path d="M3 20v-5h5"/></svg><svg class="run-cancel-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button><button id="start-practice" type="button" class="run-control run-control-play" aria-label="Start run" title="Start run"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4.5a1 1 0 0 1 1.5-.86l11 6.35a1 1 0 0 1 0 1.74l-11 6.35A1 1 0 0 1 7 17.22Z"/></svg></button><button id="pause-practice" class="run-control run-control-left" type="button" aria-label="Pause run" title="Pause run" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM15 5h4v14h-4z"/></svg></button><button id="stop-practice" class="run-control run-control-right" type="button" aria-label="Stop run" title="Stop run" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button></div><div class="timer-actions"><button id="practice-fullscreen" type="button" title="Full-screen practice" aria-label="Full-screen practice">&#x26F6;</button></div></div>
-        </div><div class="practice-score-panel">
-        <div class="section-heading"><h2>Field score</h2><span id="practice-bag-total">0 / 38 bags</span></div>
-        <div class="score-total"><span id="practice-score-label">Skills score</span><output id="practice-score-total" aria-live="polite">0</output><span>POINTS</span></div>
-        <div id="practice-scoring-inputs" class="score-calculator"></div>
-        </div></div>
-        <div class="score-actions"><button id="save-practice" type="submit" class="primary">Save practice run</button><button id="new-practice-bottom" type="button">Next run</button><button id="cancel-practice-edit" type="button" hidden>Cancel edit</button><button id="remove-practice" type="button" class="danger" hidden>Remove practice run</button><button id="practice-flow-next" type="button" class="primary flow-only">Post &amp; next run &#8594;</button></div>
-      </form>
-      <div class="practice-runs-heading"><h3>Saved practice runs</h3><label>Show<select id="practice-filter"><option value="team" selected>Selected team</option><option value="all">All teams</option></select></label></div>
-      <p class="rules-note">Latest 100 current practice runs for the team selected above, or all teams. Coaches can promote student runs to coach leaderboards; the original student entry stays in score history. Select Edit to correct a run, not to record another attempt.</p>
-      <div class="table-scroll"><table><thead><tr><th>Run time (local)</th><th>Type</th><th>Teams</th><th>Field score</th><th>Notes</th><th id="practice-actions-heading">Actions</th></tr></thead><tbody id="practice-runs"></tbody></table></div>
-    </section>
-    <section id="rubric-view" class="view" hidden>
-      <div class="section-heading"><div><p class="eyebrow">COACHING / REVIEW HISTORY</p><h2>Engineering notebook rubric</h2></div></div>
-      <p class="rules-note">Review tool. Only coach reviews update the current score and Cumulative leaderboard, using the latest coach score for each criterion. Team members can review any team and manage their own student reviews. They can read feedback for their team and reviews they wrote.</p>
-      <details id="notebook-preparation" class="interview-preparation"><summary>Preparing your notebook</summary><p>Your notebook tells the story of how your team designed, tested, and improved its solution throughout the season.</p><ul><li>Document everything you do with your robot. Take pictures as you go.</li><li>Date and organize entries so your team and others can find them later.</li><li>Show who contributed and give credit when you build on someone else's ideas.</li><li>Record sketches, code, test steps, measurements, decisions, and changes as you go.</li><li>Explain what happened, what you learned, and how that learning shaped your next step.</li></ul></details>
-      <div class="notebook-guidance-selector"><label for="notebook-guidance-version">Guidance version<select id="notebook-guidance-version"><option value="official" data-pdf="https://content.vexrobotics.com/kb/global-robotics/engineering-notebook-rubric-A4-v2.0.pdf">Official rubric</option><option value="student" data-pdf="https://content.vexrobotics.com/kb/global-robotics/student-friendly-engineering-notebook-rubric-a4-v2.0.pdf">Student-friendly rubric</option></select></label><a id="notebook-guidance-link" href="https://content.vexrobotics.com/kb/global-robotics/engineering-notebook-rubric-A4-v2.0.pdf" target="_blank" rel="noopener">Open official rubric PDF</a></div>
-      <label class="rubric-team-field">Team<select id="rubric-team"></select></label>
-      <p id="rubric-empty" class="empty">Add teams in Teams &amp; schedule to start an evaluation.</p>
-      <div id="rubric-team-history" hidden>
-        <p id="rubric-current" class="rubric-current" aria-live="polite"></p>
-        <div class="table-scroll"><table><caption>Reviews for this team</caption><thead><tr><th>Evaluation date</th><th>Reviewer</th><th>Points this review</th><th>Criteria scored</th><th>Actions</th></tr></thead><tbody id="rubric-history-rows"></tbody></table></div>
-      </div>
-      <form id="rubric-form" hidden>
-        <div class="rubric-form-heading"><h3 id="rubric-form-title">New review</h3><label class="rubric-evidence-notes-toggle"><input type="checkbox" data-rubric-evidence-notes checked> Review with notes</label></div>
-        <div class="practice-fields">
-          <label>Evaluation date<input id="rubric-date" type="date" required></label>
-          <label>Reviewer<input id="rubric-reviewer" maxlength="80" placeholder="Coach or reviewer name"></label>
+        <p class="rules-note">
+          Review tool. Only coach reviews update the current score and
+          Cumulative leaderboard, using the latest coach score for each
+          criterion. Team members can review any team and manage their own
+          student reviews. They can read feedback for their team and reviews
+          they wrote.
+        </p>
+        <details id="interview-preparation" class="interview-preparation">
+          <summary>Preparing for the interview</summary>
+          <p>
+            A team interview is a short, friendly conversation, not a test.
+            Judges want to hear your team's story in your own words.
+          </p>
+          <ul>
+            <li>
+              Take turns speaking, listen to one another, and encourage every
+              teammate to contribute.
+            </li>
+            <li>
+              You may look things up in your Engineering Notebook. No one person
+              needs to know everything.
+            </li>
+            <li>
+              Use specific examples, details, and evidence. A story about
+              something that failed and what you learned is useful too.
+            </li>
+            <li>
+              Practice asking and answering questions with teammates, and
+              explain your robot to people outside your team.
+            </li>
+          </ul>
+        </details>
+        <p class="rules-note">
+          Based on the VEX Team Interview Rubric v2.0. Guidance shows a
+          description for each rating. Ratings: 2 Heard, with Specifics; 1
+          Heard; 0 Not Yet Heard. Use zero only after giving students an
+          opportunity to address the criterion. Six criteria, totaling 12
+          points.
+        </p>
+        <div class="notebook-guidance-selector">
+          <label for="interview-guidance-version">
+            Guidance version
+            <select id="interview-guidance-version">
+              <option
+                value="official"
+                data-pdf="https://content.vexrobotics.com/kb/global-robotics/team-interview-rubric-A4-v2.0.pdf"
+              >
+                Official rubric
+              </option>
+              <option
+                value="student"
+                data-pdf="https://content.vexrobotics.com/kb/global-robotics/student-friendly-team-interview-rubric-a4-v2.0.pdf"
+              >
+                Student-friendly rubric
+              </option>
+            </select>
+          </label>
+          <a
+            id="interview-guidance-link"
+            href="https://content.vexrobotics.com/kb/global-robotics/team-interview-rubric-A4-v2.0.pdf"
+            target="_blank"
+            rel="noopener"
+          >
+            Open official rubric PDF
+          </a>
         </div>
-        <div class="rubric-score-summary" aria-live="polite"><strong id="rubric-total">0 / 64</strong><span id="rubric-completion">0 / 16 criteria scored - incomplete</span><span id="rubric-saved">No saved evaluation</span></div>
-        <div id="rubric-criteria"></div>
-        <label>Overall feedback<textarea id="rubric-overall" maxlength="4000" rows="3"></textarea></label>
-        <p class="rules-note">Leave unassessed criteria as Not scored. Each assessed criterion needs 1-4 points; zero is not a rubric rating. A review can cover only some criteria; criteria left Not scored keep their earlier score in the team's current result.</p>
-        <div class="button-row"><button id="save-rubric" type="submit" class="primary">Save new review</button><button id="cancel-rubric" type="button" hidden>Cancel edit</button></div>
-      </form>
-      <h3>All teams: current coach notebook results</h3>
-      <div class="table-scroll"><table><thead><tr><th>Team</th><th>Name</th><th>Latest review</th><th>Reviews</th><th>Current points / 64</th><th>Criteria scored</th></tr></thead><tbody id="rubric-rows"></tbody></table></div>
-    </section>
-    <section id="interview-view" class="view" hidden>
-      <div class="section-heading"><div><p class="eyebrow">COACHING / REVIEW HISTORY</p><h2>Team interview rubric</h2></div></div>
-      <p class="rules-note">Review tool. Only coach reviews update the current score and Cumulative leaderboard, using the latest coach score for each criterion. Team members can review any team and manage their own student reviews. They can read feedback for their team and reviews they wrote.</p>
-      <details id="interview-preparation" class="interview-preparation"><summary>Preparing for the interview</summary><p>A team interview is a short, friendly conversation, not a test. Judges want to hear your team's story in your own words.</p><ul><li>Take turns speaking, listen to one another, and encourage every teammate to contribute.</li><li>You may look things up in your Engineering Notebook. No one person needs to know everything.</li><li>Use specific examples, details, and evidence. A story about something that failed and what you learned is useful too.</li><li>Practice asking and answering questions with teammates, and explain your robot to people outside your team.</li></ul></details>
-      <p class="rules-note">Based on the VEX Team Interview Rubric v2.0. Guidance shows a description for each rating. Ratings: 2 Heard, with Specifics; 1 Heard; 0 Not Yet Heard. Use zero only after giving students an opportunity to address the criterion. Six criteria, totaling 12 points.</p>
-      <div class="notebook-guidance-selector"><label for="interview-guidance-version">Guidance version<select id="interview-guidance-version"><option value="official" data-pdf="https://content.vexrobotics.com/kb/global-robotics/team-interview-rubric-A4-v2.0.pdf">Official rubric</option><option value="student" data-pdf="https://content.vexrobotics.com/kb/global-robotics/student-friendly-team-interview-rubric-a4-v2.0.pdf">Student-friendly rubric</option></select></label><a id="interview-guidance-link" href="https://content.vexrobotics.com/kb/global-robotics/team-interview-rubric-A4-v2.0.pdf" target="_blank" rel="noopener">Open official rubric PDF</a></div>
-      <label class="rubric-team-field">Team<select id="interview-team"></select></label>
-      <p id="interview-empty" class="empty">Add teams in Teams &amp; schedule to start an interview evaluation.</p>
-      <div id="interview-team-history" hidden>
-        <p id="interview-current" class="rubric-current" aria-live="polite"></p>
-        <div class="table-scroll"><table><caption>Reviews for this team</caption><thead><tr><th>Interview date</th><th>Reviewer</th><th>Points this review</th><th>Criteria scored</th><th>Actions</th></tr></thead><tbody id="interview-history-rows"></tbody></table></div>
-      </div>
-      <form id="interview-form" hidden>
-        <div class="rubric-form-heading"><h3 id="interview-form-title">New review</h3><label class="rubric-evidence-notes-toggle"><input type="checkbox" data-rubric-evidence-notes checked> Review with notes</label></div>
-        <div class="practice-fields">
-          <label>Interview date<input id="interview-date" type="date" required></label>
-          <label>Reviewer<input id="interview-reviewer" maxlength="80" placeholder="Coach or reviewer name"></label>
+        <label class="rubric-team-field">
+          Team
+          <select id="interview-team"></select>
+        </label>
+        <p id="interview-empty" class="empty">
+          Add teams in Teams &amp; schedule to start an interview evaluation.
+        </p>
+        <div id="interview-team-history" hidden>
+          <p
+            id="interview-current"
+            class="rubric-current"
+            aria-live="polite"
+          ></p>
+          <div class="table-scroll">
+            <table>
+              <caption>Reviews for this team</caption>
+              <thead>
+                <tr>
+                  <th>Interview date</th>
+                  <th>Reviewer</th>
+                  <th>Points this review</th>
+                  <th>Criteria scored</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="interview-history-rows"></tbody>
+            </table>
+          </div>
         </div>
-        <div class="rubric-score-summary" aria-live="polite"><strong id="interview-total">0 / 12</strong><span id="interview-completion">0 / 6 criteria scored - incomplete</span><span id="interview-saved">No saved evaluation</span></div>
-        <div id="interview-criteria"></div>
-        <label>Overall feedback<textarea id="interview-overall" maxlength="4000" rows="3"></textarea></label>
-        <p class="rules-note">Leave unassessed criteria as Not scored. Zero is an assessed rating, not a missing value. A review can cover only some criteria; criteria left Not scored keep their earlier score in the team's current result.</p>
-        <div class="button-row"><button id="save-interview" type="submit" class="primary">Save new review</button><button id="cancel-interview" type="button" hidden>Cancel edit</button></div>
-      </form>
-      <h3>All teams: current coach interview results</h3>
-      <div class="table-scroll"><table><thead><tr><th>Team</th><th>Name</th><th>Latest review</th><th>Reviews</th><th>Current points / 12</th><th>Criteria scored</th></tr></thead><tbody id="interview-rows"></tbody></table></div>
-    </section>
-    <section id="access-view" class="view" hidden>
-      <div class="section-heading"><div><p class="eyebrow">SHARED APP / PERMISSIONS</p><h2>App access</h2></div></div>
-      <p class="rules-note">App owner: <strong id="access-owner">the account that deployed the app</strong></p>
-      <p class="rules-note"><strong>Coaches</strong> can use all parts of the app. <strong>Team members</strong> can save practice runs, view leaderboards, and read reviews for their team and reviews they wrote. They cannot score matches or Skills, edit practice runs, change teams, schedules, finals, robots, backups, or reviews, or open Score History. Other visitors, including <span id="access-domain">district</span> accounts not listed here, can view results only. Changes take effect the next time a person opens or saves.</p>
-      <form id="access-form" class="access-form">
-        <label>Name<input id="access-name" type="text" maxlength="80" required autocomplete="name" placeholder="Student or coach name"></label>
-        <label>Google account email<input id="access-email" type="email" maxlength="254" required autocomplete="off" placeholder="name@nu-district.org"></label>
-        <label>Role<select id="access-role"><option value="member">Team member</option><option value="coach">Coach</option></select></label>
-        <label>Team<select id="access-team"></select></label>
-        <button id="save-access" type="submit" class="primary">Add or update</button>
-      </form>
-      <p id="access-status" class="rules-note" role="status"></p>
-      <div class="table-scroll"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Team</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="access-rows"></tbody></table></div>
-    </section>
-    <section id="history-view" class="view" hidden>
-      <div class="section-heading"><div><p class="eyebrow">ALL SESSIONS / AUDIT HISTORY</p><h2>Saved scores</h2><p id="history-summary"></p></div></div>
-      <div class="history-exports" role="group" aria-label="Export score history">
-        <div class="history-export"><button id="export-analysis" class="primary" type="button">Export resolved scores CSV</button><p>Current scores for analysis: one row per result, using the latest correction. Removed and voided results are excluded.</p></div>
-        <div class="history-export"><button id="export-history" type="button">Export all scores CSV</button><p>Full audit trail: every post, correction, promotion, removal, and void as its own row.</p></div>
-      </div>
-      <p class="rules-note">Every posted score, correction, promotion, and removal is retained across new sessions. This table shows the latest 100 records; CSV and JSON backups include the complete history. Removal/void records describe the result being removed, not a new run.</p>
-      <div class="table-scroll"><table><thead><tr><th>Recorded (local)</th><th>Event / Session</th><th>Result</th><th>Teams</th><th>Action</th><th>Field score</th></tr></thead><tbody id="history-records"></tbody></table></div>
-    </section>
-  </main>
-  <footer><span id="footer-storage">Saved on this device</span><span>Created for North Union Vex IQ. Not an official VEX tool.</span><span class="footer-history"><a id="open-history" href="#history-view">Score history</a> <span id="footer-history-count"></span></span></footer>
-</body>
+        <form id="interview-form" hidden>
+          <div class="rubric-form-heading">
+            <h3 id="interview-form-title">New review</h3>
+            <label class="rubric-evidence-notes-toggle">
+              <input type="checkbox" data-rubric-evidence-notes checked />
+              Review with notes
+            </label>
+          </div>
+          <div class="practice-fields">
+            <label>
+              Interview date
+              <input id="interview-date" type="date" required />
+            </label>
+            <label>
+              Reviewer
+              <input
+                id="interview-reviewer"
+                maxlength="80"
+                placeholder="Coach or reviewer name"
+              />
+            </label>
+          </div>
+          <div class="rubric-score-summary" aria-live="polite">
+            <strong id="interview-total">0 / 12</strong>
+            <span id="interview-completion">
+              0 / 6 criteria scored - incomplete
+            </span>
+            <span id="interview-saved">No saved evaluation</span>
+          </div>
+          <div id="interview-criteria"></div>
+          <label>
+            Overall feedback
+            <textarea
+              id="interview-overall"
+              maxlength="4000"
+              rows="3"
+            ></textarea>
+          </label>
+          <p class="rules-note">
+            Leave unassessed criteria as Not scored. Zero is an assessed rating,
+            not a missing value. A review can cover only some criteria; criteria
+            left Not scored keep their earlier score in the team's current
+            result.
+          </p>
+          <div class="button-row">
+            <button id="save-interview" type="submit" class="primary">
+              Save new review
+            </button>
+            <button id="cancel-interview" type="button" hidden>
+              Cancel edit
+            </button>
+          </div>
+        </form>
+        <h3>All teams: current coach interview results</h3>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Name</th>
+                <th>Latest review</th>
+                <th>Reviews</th>
+                <th>Current points / 12</th>
+                <th>Criteria scored</th>
+              </tr>
+            </thead>
+            <tbody id="interview-rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <!-- Shared Apps Script access-list management. -->
+      <section id="access-view" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">SHARED APP / PERMISSIONS</p>
+            <h2>App access</h2>
+          </div>
+        </div>
+        <p class="rules-note">
+          App owner:
+          <strong id="access-owner">the account that deployed the app</strong>
+        </p>
+        <p id="access-permissions-note" class="rules-note">
+          <strong>Coaches</strong>
+          can use all parts of the app.
+          <strong>Team members</strong>
+          can save practice runs, view leaderboards, and read reviews for their
+          team and reviews they wrote. They cannot score matches or Skills, edit
+          practice runs, change teams, schedules, finals, robots, backups, or
+          reviews, or open Score History. Other visitors, including
+          <span id="access-domain">district</span>
+          accounts not listed here, can view results only. Changes take effect
+          the next time a person opens or saves.
+        </p>
+        <form id="access-form" class="access-form">
+          <label>
+            Name
+            <input
+              id="access-name"
+              type="text"
+              maxlength="80"
+              required
+              autocomplete="name"
+              placeholder="Student or coach name"
+            />
+          </label>
+          <label>
+            Google account email
+            <input
+              id="access-email"
+              type="email"
+              maxlength="254"
+              required
+              autocomplete="off"
+              placeholder="name@nu-district.org"
+            />
+          </label>
+          <label>
+            Role
+            <select id="access-role">
+              <option value="member">Team member</option>
+              <option value="coach">Coach</option>
+            </select>
+          </label>
+          <label>
+            Team
+            <select id="access-team"></select>
+          </label>
+          <div class="access-form-actions">
+            <button id="save-access" type="submit" class="primary">
+              Add or update
+            </button>
+            <button id="cancel-access-edit" type="button" hidden>
+              Cancel edit
+            </button>
+          </div>
+        </form>
+        <p id="access-status" class="rules-note" role="status"></p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Team</th>
+                <th><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="access-rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <!-- Immutable score-history browser and export. -->
+      <section id="history-view" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ALL SESSIONS / AUDIT HISTORY</p>
+            <h2>Saved scores</h2>
+            <p id="history-summary"></p>
+          </div>
+        </div>
+        <div
+          class="history-exports"
+          role="group"
+          aria-label="Export score history"
+        >
+          <div class="history-export">
+            <button id="export-analysis" class="primary" type="button">
+              Export resolved scores CSV
+            </button>
+            <p>
+              Current scores for analysis: one row per result, using the latest
+              correction. Removed and voided results are excluded.
+            </p>
+          </div>
+          <div class="history-export">
+            <button id="export-history" type="button">
+              Export all scores CSV
+            </button>
+            <p>
+              Full audit trail: every post, correction, promotion, removal, and
+              void as its own row.
+            </p>
+          </div>
+        </div>
+        <p class="rules-note">
+          Every posted score, correction, promotion, and removal is retained
+          across new sessions. This table shows the latest 100 records; CSV and
+          JSON backups include the complete history. Removal/void records
+          describe the result being removed, not a new run.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Recorded (local)</th>
+                <th>Event / Session</th>
+                <th>Result</th>
+                <th>Teams</th>
+                <th>Action</th>
+                <th>Field score</th>
+              </tr>
+            </thead>
+            <tbody id="history-records"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <span id="footer-storage">Saved on this device</span>
+      <span data-game-disclaimer>
+        Created for North Union Vex IQ. Not an official VEX tool.
+      </span>
+      <span class="footer-history">
+        <a id="open-history" href="#history-view">Score history</a>
+        <span id="footer-history-count"></span>
+      </span>
+    </footer>
+  </body>
 </html>

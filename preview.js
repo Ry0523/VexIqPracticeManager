@@ -13,7 +13,7 @@
   // A small event with posted matches, skills, practice, robots, and reviews for the first two teams, built with the
   // app's own models so it always matches the current data format.
   function sampleEvent() {
-    const { MatchCore: Core, ScoreHistory: History, NotebookRubric: Rubric, EventModel } = globalThis;
+    const { EventRules: Core, ScoreHistory: History, NotebookRubric: Rubric, EventModel } = globalThis;
     const teams = SAMPLE_TEAMS.map(([id, name], draw) => ({ id, name, draw }));
     const event = EventModel.validate({ version: 1, sessionId: History.newId(), history: [], name: "Sample event", teams, matches: [], skills: [], skillsOnly: false, rounds: 4, start: "09:00", interval: 3, selected: null });
     let seed = 7;

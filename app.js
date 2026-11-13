@@ -1,15 +1,20 @@
 "use strict";
-const Core = globalThis.MatchCore;
+/**
+ * Browser application coordinator. Owns navigation and the active event draft,
+ * then delegates persistence, validation, history, and specialized workflows
+ * to EventStorage, EventModel, ScoreHistory, SkillsUI, PracticeUI, and review UIs.
+ */
+const Core = globalThis.EventRules;
 const History = globalThis.ScoreHistory;
 const Finals = globalThis.FinalsModel;
 const Game = globalThis.VexGame;
 const ACTIVE_GAME = Game.active;
 const MATCH_MS = Core.TIMING.matchMs;
 // Storage keys keep their original names so existing saved data is still found after a game change.
-const STORAGE_KEY = "level-up-local-event-v1";
+const STORAGE_KEY = `${Game.ACTIVE_GAME_ID}-local-event-v1`;
 const get = id => document.getElementById(id);
 const escapeText = value => String(value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
-const emptyState = () => ({ version: 1, game: Game.ACTIVE_GAME_ID, sessionId: History.newId(), history: [], rubrics: [], interviews: [], robots: [], name: "Local teamwork", teams: [], matches: [], finals: [], finalsWithdrawn: [], selectedPhase: "qualification", skills: [], skillsOnly: false, rounds: 6, start: "09:00", interval: 3, selected: null });
+const emptyState = () => ({ version: 1, game: Game.ACTIVE_GAME_ID, sessionId: History.newId(), history: [], rubrics: [], interviews: [], robots: [], name: ACTIVE_GAME.eventName || (ACTIVE_GAME.program === "VEX IQ" ? "Local teamwork" : `${ACTIVE_GAME.name} practice`), teams: [], matches: [], finals: [], finalsWithdrawn: [], selectedPhase: "qualification", skills: [], skillsOnly: false, rounds: 6, start: "09:00", interval: 3, selected: null });
 let state = emptyState();
 let draft = { counts: Core.emptyCounts(), statuses: {} };
 let dirty = false;
@@ -21,13 +26,15 @@ let unsaved = false;
 let saveRevision = 0;
 let storageReady = false;
 let analysisTeam = null;
+let officialStandings = ACTIVE_GAME.officialStandings || null;
+let officialStandingsRequest = 0;
 let analysisRobot = "current";
 let robotTeam = null;
 let editingRobot = null;
 let removingRobot = null;
 let analysisSort = { field: "rank", direction: "ascending" };
 
-const inSwitchWindow = ms => ms <= Core.TIMING.driverSwitch.openMs && ms >= Core.TIMING.driverSwitch.closeMs;
+const inSwitchWindow = ms => Boolean(Core.TIMING.driverSwitch && ms <= Core.TIMING.driverSwitch.openMs && ms >= Core.TIMING.driverSwitch.closeMs);
 const clockText = ms => { const seconds = Math.ceil(Math.min(MATCH_MS, ms) / 1000); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; };
 const timerProgressAngle = ms => `${((MATCH_MS - Math.max(0, Math.min(MATCH_MS, ms))) * 360 / MATCH_MS).toFixed(2)}deg`;
 const fileName = suffix => `${ACTIVE_GAME.id}-${suffix}`;
@@ -132,10 +139,28 @@ async function saveResultChange(next, kind, value, action) {
 }
 
 function renderHistory() {
-  const rows = analysisRanking();
+  const practiceOnly = ACTIVE_GAME.practiceOnly;
+  const rows = practiceOnly ? state.teams : analysisRanking();
+  const view = get("analysis-view");
+  [...view.children].forEach(child => {
+    if (["team-analysis", "v5-analysis-controls"].includes(child.id) || child.classList.contains("section-heading")) return;
+    child.hidden = practiceOnly;
+  });
+  get("v5-analysis-controls").hidden = !practiceOnly;
+  get("v5-analysis-empty").hidden = !practiceOnly || rows.length > 0;
+  get("analysis-view").querySelector(".section-heading .eyebrow").textContent = practiceOnly ? "SAVED PRACTICE / TEAM METRICS" : "ALL SAVED SESSIONS / COACHING";
+  get("analysis-view").querySelector(".section-heading h2").textContent = practiceOnly ? "Team analysis" : "Cumulative leaderboard";
+  document.querySelector('[data-tab="analysis"]').textContent = practiceOnly ? "Analysis" : "Cumulative leaderboard";
+  if (practiceOnly) {
+    const select = get("v5-analysis-team");
+    if (!rows.some(team => team.id === analysisTeam)) analysisTeam = rows[0]?.id || null;
+    select.innerHTML = rows.map(team => `<option value="${escapeText(team.id)}">${escapeText(team.id)} / ${escapeText(team.name)}</option>`).join("") || '<option value="">No teams registered</option>';
+    select.value = analysisTeam || "";
+  }
   document.querySelectorAll("[data-analysis-sort]").forEach(button => button.closest("th").setAttribute("aria-sort", button.dataset.analysisSort === analysisSort.field ? analysisSort.direction : "none"));
-  get("analysis-rows").innerHTML = sortAnalysis(rows).map(row => `<tr><td>${row.rank}</td><td><button type="button" class="team-analysis-link" data-analysis-team="${escapeText(row.id)}" aria-label="Analyze ${escapeText(row.id)}">${escapeText(row.id)}</button></td><td>${escapeText(row.name)}</td>${[["skills", "skillsPoints"], ["teamwork", "teamworkPoints"], ["notebook", "notebookPoints"], ["interview", "interviewPoints"]].map(([raw, points]) => `<td>${row[points].toFixed(2)}<small>Raw: ${row[raw]}</small></td>`).join("")}<td><strong>${row.total.toFixed(2)}</strong></td><td>${row.missing.length ? escapeText(row.missing.join("; ")) : "Complete"}</td></tr>`).join("") || '<tr><td colspan="9">No teams registered.</td></tr>';
+  if (!practiceOnly) get("analysis-rows").innerHTML = sortAnalysis(rows).map(row => `<tr><td>${row.rank}</td><td><button type="button" class="team-analysis-link" data-analysis-team="${escapeText(row.id)}" aria-label="Analyze ${escapeText(row.id)}">${escapeText(row.id)}</button></td><td>${escapeText(row.name)}</td>${[["skills", "skillsPoints"], ["teamwork", "teamworkPoints"], ["notebook", "notebookPoints"], ["interview", "interviewPoints"]].map(([raw, points]) => `<td>${row[points].toFixed(2)}<small>Raw: ${row[raw]}</small></td>`).join("")}<td><strong>${row.total.toFixed(2)}</strong></td><td>${row.missing.length ? escapeText(row.missing.join("; ")) : "Complete"}</td></tr>`).join("") || '<tr><td colspan="9">No teams registered.</td></tr>';
   renderTeamAnalysis(rows);
+  if (practiceOnly) return;
   const records = seasonHistory();
   const sessions = new Set(records.map(record => record.sessionId)).size;
   const archived = state.history.length - records.length;
@@ -163,20 +188,45 @@ function analysisRanking() { return globalThis.NotebookRubric.combinedRanking(an
 function renderTeamAnalysis(rows = analysisRanking()) {
   const team = rows.find(row => row.id === analysisTeam);
   get("team-analysis").hidden = !team;
+  get("v5-match-analysis").hidden = !ACTIVE_GAME.practiceOnly || !team;
   if (!team) { analysisTeam = null; return; }
-  get("team-analysis-heading").textContent = `${team.id} / ${team.name}`;
+  get("team-analysis-team-id").hidden = !ACTIVE_GAME.practiceOnly;
+  get("team-analysis-team-id").textContent = team.id;
+  get("team-profile-row").hidden = !ACTIVE_GAME.teamProfileProgram;
+  if (ACTIVE_GAME.teamProfileProgram) get("team-profile").href = `https://events.vex.com/teams/${encodeURIComponent(ACTIVE_GAME.teamProfileProgram)}/${encodeURIComponent(team.id)}`;
+  const standingsSnapshot = officialStandings;
+  const officialStanding = standingsSnapshot?.teams?.[team.id.toUpperCase()];
+  get("official-standings").hidden = !ACTIVE_GAME.officialStandings || !officialStanding;
+  if (officialStanding) {
+    get("official-standings-captured").textContent = standingsSnapshot.capturedAt;
+    get("official-standings-grade").textContent = officialStanding.gradeLevel;
+    get("official-standings-source").href = officialStanding.sourceUrl || `${standingsSnapshot.sourceUrl}?search=${encodeURIComponent(team.id)}&event_region=&country=${ACTIVE_GAME.officialStandings.countryId}&region=${ACTIVE_GAME.officialStandings.regionId}&grade_level=${encodeURIComponent(officialStanding.gradeLevel)}`;
+    get("official-standings-row").innerHTML = `<tr>${[officialStanding.row, officialStanding.rank, officialStanding.score, officialStanding.autonomous, officialStanding.driver, officialStanding.highestAutonomous, officialStanding.highestDriver].map(value => `<td>${value}</td>`).join("")}</tr>`;
+  }
+  get("team-analysis-heading").textContent = ACTIVE_GAME.practiceOnly ? team.name : `${team.id} / ${team.name}`;
   const versions = History.robotVersions(state.robots, team.id);
   const robotOf = History.robotAttribution(seasonHistory(), state.robots);
   const current = History.currentRobot(state.robots, team.id);
   if (analysisRobot !== "current" && analysisRobot !== "all" && analysisRobot !== "original" && !versions.some(robot => robot.id === analysisRobot)) analysisRobot = "current";
-  get("team-analysis-robot-field").hidden = !versions.length;
+  get("team-analysis-robot-field").hidden = ACTIVE_GAME.practiceOnly || !versions.length;
   get("team-analysis-robot").innerHTML = [["current", `Current robot (${current ? current.name : "Original robot"})`], ["all", "All robots"], ["original", "Original robot"], ...versions.map(robot => [robot.id, `${robot.name} (from ${History.localDate(robot.startedAt)})${robot.abandonedAt !== undefined ? " - abandoned" : ""}`])].map(([value, label]) => `<option value="${escapeText(value)}">${escapeText(label)}</option>`).join("");
   get("team-analysis-robot").value = analysisRobot;
   const target = analysisRobot === "current" ? current?.id ?? null : analysisRobot === "original" ? null : analysisRobot;
-  const detail = History.teamAnalysis(analysisRecords(), team.id, analysisRobot === "all" ? () => true : record => robotOf(record, team.id) === target);
-  get("team-robot-comparison").hidden = !versions.length;
+  const detail = History.teamAnalysis(analysisRecords(), team.id, ACTIVE_GAME.practiceOnly || analysisRobot === "all" ? () => true : record => robotOf(record, team.id) === target);
+  if (ACTIVE_GAME.practiceOnly) {
+    const metrics = detail.scrimmage;
+    const format = value => Number.isFinite(value) ? value.toFixed(2) : "--";
+    get("v5-scrimmage-metrics").innerHTML = `<tr><td>${metrics.matches}</td><td>${metrics.wins}-${metrics.ties}-${metrics.losses}</td><td>${metrics.wp}</td><td>${metrics.ap}</td><td>${metrics.sp}</td><td>${format(metrics.scoreFor.best)} / ${format(metrics.scoreFor.average)}</td><td>${format(metrics.scoreAgainst.average)}</td><td>${format(metrics.scoreDifferential.average)}</td><td>${format(metrics.opr)}</td><td>${format(metrics.dpr)}</td><td>${format(metrics.ccwm)}</td></tr>`;
+    get("v5-rating-note").hidden = metrics.opr !== null && metrics.dpr !== null && metrics.ccwm !== null;
+    get("close-team-analysis").hidden = true;
+    get("team-analysis-partners-heading").textContent = "Practice scrimmage partners";
+  } else {
+    get("close-team-analysis").hidden = false;
+    get("team-analysis-partners-heading").textContent = "Teamwork by partner";
+  }
+  get("team-robot-comparison").hidden = ACTIVE_GAME.practiceOnly || !versions.length;
   get("team-robot-rows").innerHTML = versions.length ? History.robotComparison(analysisRecords(), state.robots, team.id).map(row => `<tr${row.current ? ' class="current-robot"' : ""}><td>${escapeText(row.name)}${row.current ? " <small>Current</small>" : row.abandonedAt !== undefined ? ` <small class="robot-abandoned">Abandoned ${escapeText(History.localDate(row.abandonedAt))}</small>` : ""}${row.notes ? `<small>${escapeText(row.notes)}</small>` : ""}</td><td>${row.startedAt ? escapeText(History.localDateTime(row.startedAt)) : "Before first version"}</td>${["teamwork", "driver", "autonomous"].map(mode => `<td>${row.modes[mode].count}</td><td>${average(row.modes[mode].best)}</td><td>${average(row.modes[mode].average)}</td>`).join("")}<td><strong>${row.skillsBest ?? "--"}</strong></td></tr>`).join("") : "";
-  const names = { teamwork: "Teamwork (shared score)", driver: "Driver skills", autonomous: "Autonomous skills" };
+  const names = { teamwork: ACTIVE_GAME.practiceOnly ? "Teamwork scrimmage" : "Teamwork (shared score)", driver: "Driver skills", autonomous: "Autonomous skills" };
   const improvement = value => value === null ? "--" : `${value > 0 ? "+" : ""}${value.toFixed(2)} points`;
   get("team-analysis-summary").innerHTML = Object.entries(detail.modes).map(([mode, stats]) => `<tr><td>${names[mode]}</td><td>${stats.count}</td><td>${average(stats.recentAverage)}<small>Last ${stats.recentCount} dated runs</small></td><td>${improvement(stats.change)}<small>Compared with preceding ${stats.previousCount} runs</small></td><td>${average(stats.recentBest)}</td><td>${average(stats.best)}<small>${escapeText(stats.bestDate)}</small></td><td>${stats.dq}</td></tr>`).join("");
   get("team-analysis-trends").innerHTML = Object.entries(detail.modes).map(([mode, stats]) => {
@@ -201,6 +251,25 @@ function renderTeamAnalysis(rows = analysisRanking()) {
       return `<tr><td>${escapeText(session.name)}${session.id ? `<small>${escapeText(session.id)}</small>` : ""}</td><td>${names[mode]}</td><td>${summary.count}</td><td>${average(summary.best)}</td><td>${average(summary.average)}</td></tr>`;
     });
   }).join("") || '<tr><td colspan="5">No results for this team.</td></tr>';
+}
+
+async function refreshOfficialStandings() {
+  const load = globalThis.EventStorage.loadOfficialSkillsStandings;
+  if (!ACTIVE_GAME.officialStandings || typeof load !== "function") return;
+  const request = ++officialStandingsRequest;
+  get("official-standings-status").textContent = "Refreshing official standings...";
+  try {
+    const snapshot = await load.call(globalThis.EventStorage);
+    if (request !== officialStandingsRequest) return;
+    if (!snapshot?.capturedAt || !snapshot.teams || typeof snapshot.teams !== "object") throw new Error("Invalid standings response.");
+    officialStandings = snapshot;
+    get("official-standings-status").textContent = `Updated from VEX at ${History.localDateTime(snapshot.capturedAt)}.`;
+    renderTeamAnalysis(ACTIVE_GAME.practiceOnly ? state.teams : analysisRanking());
+  } catch (error) {
+    if (request !== officialStandingsRequest) return;
+    const fallback = officialStandings?.capturedAt ? `Showing the saved snapshot from ${officialStandings.capturedAt}.` : "No saved standings are available.";
+    get("official-standings-status").textContent = `Live refresh failed. ${fallback}`;
+  }
 }
 
 function activeMatches() { return state.selectedPhase === "finals" ? state.finals : state.matches; }
@@ -264,20 +333,22 @@ function syncScreenWakeLock(force = false) {
 document.addEventListener("visibilitychange", () => syncScreenWakeLock(true));
 document.addEventListener("fullscreenchange", () => syncScreenWakeLock());
 const hostedHistory = globalThis.google?.script?.history;
-const tabNames = () => new Set([...document.querySelectorAll("[data-tab]")].filter(button => !button.hidden).map(button => button.dataset.tab).concat(accessRole() === "coach" ? "history" : [], canManageAccess() ? "access" : []));
+const tabNames = () => new Set([...document.querySelectorAll("[data-tab]")].filter(button => !button.hidden).map(button => button.dataset.tab).concat(accessRole() === "coach" && !ACTIVE_GAME.practiceOnly ? "history" : [], canManageAccess() ? "access" : []));
 // Shared-app roles come from the server: coaches see everything; team members save new practice runs and read reviews
 // and submit student reviews, but do not see setup, match control, skills scoring, or score history; viewers get a results-only view with no
 // printing, exports, settings, or score history, and see the schedule only once one exists.
 // The server enforces the same rules on every save.
 const VIEWER_TABS = new Set(["control", "rankings", "skills-rankings", "analysis"]);
+const PRACTICE_ONLY_VIEWER_TABS = new Set(["practice", "rubric", "interview"]);
 const MEMBER_HIDDEN_TABS = new Set(["setup", "control", "skills"]);
+const PRACTICE_ONLY_HIDDEN_TABS = new Set(["control", "rankings", "skills", "skills-rankings"]);
 const accessRole = () => globalThis.EventStorage.access?.role || (globalThis.EventStorage.readOnly ? "viewer" : "coach");
 const isMember = () => accessRole() === "member";
 // Coaches open the access list from Settings; it exists only in the shared app.
 const canManageAccess = () => accessRole() === "coach" && Boolean(globalThis.EventStorage.shared);
-const canPreviewStudent = () => globalThis.EventStorage.shared && globalThis.EventStorage.access?.isOwner === true && !globalThis.EventStorage.previewing;
+const canPreviewStudent = () => !ACTIVE_GAME.practiceOnly && globalThis.EventStorage.shared && globalThis.EventStorage.access?.isOwner === true && !globalThis.EventStorage.previewing;
 const hasSchedule = () => state.matches.length > 0 || state.finals.length > 0;
-const defaultTab = () => activeMatches().length && tabNames().has("control") ? "control" : { viewer: "rankings", member: "practice" }[accessRole()] || "setup";
+const defaultTab = () => ACTIVE_GAME.practiceOnly ? state.teams.length ? "practice" : "setup" : activeMatches().length && tabNames().has("control") ? "control" : { viewer: "rankings", member: "practice" }[accessRole()] || "setup";
 function readOnlyMessage() {
   const { email = "", domain = "" } = globalThis.EventStorage.access || {};
   const account = domain ? `a ${domain} Google account` : "a district Google account";
@@ -297,14 +368,15 @@ function renderStudentPreviewControls() {
 }
 function applyAccess() {
   const role = accessRole();
+  const viewerTabs = ACTIVE_GAME.practiceOnly ? PRACTICE_ONLY_VIEWER_TABS : VIEWER_TABS;
   document.body.classList.toggle("read-only", role === "viewer");
   document.body.classList.toggle("member", role === "member");
   document.querySelectorAll("[data-tab]").forEach(button => {
     const name = button.dataset.tab;
-    button.hidden = role === "viewer" ? !VIEWER_TABS.has(name) || (name === "control" && !hasSchedule()) : role === "member" && MEMBER_HIDDEN_TABS.has(name);
+    button.hidden = ACTIVE_GAME.practiceOnly && PRACTICE_ONLY_HIDDEN_TABS.has(name) || (role === "viewer" ? !viewerTabs.has(name) || (name === "control" && !hasSchedule()) : role === "member" && MEMBER_HIDDEN_TABS.has(name));
   });
   document.querySelector('[data-tab="control"]').textContent = role === "viewer" ? "Schedule" : "Match control";
-  get("open-history").closest(".footer-history").hidden = role !== "coach";
+  get("open-history").closest(".footer-history").hidden = role !== "coach" || ACTIVE_GAME.practiceOnly;
   get("settings-access").hidden = !canManageAccess();
   renderStudentPreviewControls();
   updateEventData();
@@ -387,6 +459,7 @@ function tab(name, record = true) {
       if (nav.scrollWidth > nav.clientWidth) nav.scrollLeft = button.offsetLeft - nav.offsetLeft - (nav.clientWidth - button.offsetWidth) / 2;
     }
   });
+  if (name === "analysis" && ACTIVE_GAME.officialStandings) refreshOfficialStandings();
   if (name === "access") globalThis.AccessUI?.open();
   if (name === "history") get("open-history").setAttribute("aria-current", "page");
   else get("open-history").removeAttribute("aria-current");
@@ -395,6 +468,11 @@ function tab(name, record = true) {
 function renderFooter() {
   const member = globalThis.EventStorage?.shared && globalThis.EventStorage.access?.role === "member";
   get("footer-storage").textContent = globalThis.EventStorage?.readOnly ? "Read-only results from the shared Google Sheet" : member ? `Team ${globalThis.EventStorage.access.team} member / scores saved to the shared Google Sheet` : globalThis.EventStorage?.shared ? "Saved to the shared Google Sheet" : "Saved on this device";
+  const associatedTeam = globalThis.EventStorage?.access?.team || "";
+  const team = state.teams.find(entry => entry.id === associatedTeam);
+  const teamIndicator = get("associated-team");
+  teamIndicator.textContent = associatedTeam ? `Your team: ${associatedTeam}${team ? ` / ${team.name}` : ""}` : "";
+  teamIndicator.hidden = !associatedTeam;
   const scores = History.forGame(History.resolve(state.history)).length;
   get("footer-history-count").textContent = `/ ${scores.toLocaleString()} ${scores === 1 ? "score" : "scores"} saved`;
 }
@@ -429,8 +507,10 @@ function render() {
   get("match-list").innerHTML = matchChoices(state.matches) || '<p class="empty">No qualification matches scheduled.</p>';
   get("match-empty").hidden = Boolean(currentMatch());
   get("match-workspace").hidden = !currentMatch();
-  renderStandings();
-  renderFinals();
+  if (!ACTIVE_GAME.practiceOnly) {
+    renderStandings();
+    renderFinals();
+  }
   renderHistory();
   globalThis.SkillsUI?.render();
   globalThis.PracticeUI?.render();
@@ -493,18 +573,22 @@ function updateEstimate() {
 
 function goalPath(goals, path) { return path.reduce((value, key) => value[key], goals); }
 
-function goalCounter(input, scoringDraft = draft, prefix = "goal") {
+function goalCounter(input, scoringDraft = draft, prefix = "goal", mode = null) {
   const { object, objects, maxObjects, elements } = ACTIVE_GAME.scoring;
   const count = goalPath(scoringDraft.goals, input.path);
   const id = `${prefix}-${input.path.join("-")}`;
   const label = escapeText(input.ariaLabel || input.label);
+  const counterLabel = escapeText(input.counterLabel || `${label} ${input.objects || objects}`.trim());
+  const itemObject = input.object || object;
+  const itemObjects = input.objects || objects;
+  const inputMax = input.maxByMode?.[mode] ?? input.max ?? maxObjects;
   const points = elements[input.element].points;
-  return `<div class="goal-counter"><label for="${id}">${escapeText(input.label)}</label><div class="goal-stepper"><button type="button" data-step="-1" data-counter="${id}" aria-label="Decrease ${label} ${objects}" title="Remove one ${object}">&minus;</button><input id="${id}" aria-label="${label} ${objects}" data-goal-path="${input.path.join(".")}" data-goal-points="${points}" type="number" inputmode="numeric" min="0"${maxObjects ? ` max="${maxObjects}"` : ""} step="1" value="${count}" required><button type="button" data-step="1" data-counter="${id}" aria-label="Increase ${label} ${objects}" title="Add one ${object}">+</button></div><small>${points} ${points === 1 ? "pt" : "pts"}</small></div>`;
+  return `<div class="goal-counter"><label for="${id}">${escapeText(input.label)}</label><div class="goal-stepper"><button type="button" data-step="-1" data-counter="${id}" aria-label="Decrease ${counterLabel}" title="Remove one ${itemObject}">&minus;</button><input id="${id}" aria-label="${counterLabel}" data-goal-path="${input.path.join(".")}" data-goal-points="${points}" data-goal-max="${inputMax ?? ""}" type="number" inputmode="numeric" min="0"${inputMax ? ` max="${inputMax}"` : ""} step="1" value="${count}" required><button type="button" data-step="1" data-counter="${id}" aria-label="Increase ${counterLabel}" title="Add one ${itemObject}">+</button></div><small>${points} ${points === 1 ? "pt" : "pts"}</small></div>`;
 }
 
 // Builds the scoring grid from the active game's layout (see games/).
-function renderScoringInputs(container = get("scoring-inputs"), scoringDraft = draft, prefix = "goal") {
-  container.innerHTML = ACTIVE_GAME.layout.filter(group => !group.optional || group.optional(scoringDraft.goals)).map(group => `<section class="goal-group goal-${group.id}" style="--goal-color:${group.color};--goal-wash:${group.wash}" aria-label="${escapeText(group.title)}"><div class="goal-group-heading"><h3>${escapeText(group.title)}</h3><span data-group-total="${group.id}">0 pts</span></div>${group.note ? `<p class="legacy-goals-note">${escapeText(group.note)}</p>` : ""}<div class="goal-group-body"><div class="goal-counters">${group.inputs.map(input => goalCounter(input, scoringDraft, prefix)).join("")}</div>${group.diagram || ""}</div></section>`).join("");
+function renderScoringInputs(container = get("scoring-inputs"), scoringDraft = draft, prefix = "goal", mode = null) {
+  container.innerHTML = ACTIVE_GAME.layout.map(group => ({ ...group, inputs: group.inputs.filter(input => !input.modes || !mode || input.modes.includes(mode)) })).filter(group => group.inputs.length && (!group.optional || group.optional(scoringDraft.goals))).map(group => `<section class="goal-group goal-${group.id}" style="--goal-color:${group.color};--goal-wash:${group.wash}" aria-label="${escapeText(group.title)}"><div class="goal-group-heading"><h3>${escapeText(group.title)}</h3><span data-group-total="${group.id}">0 pts</span></div>${group.note ? `<p class="legacy-goals-note">${escapeText(group.note)}</p>` : ""}<div class="goal-group-body"><div class="goal-counters">${group.inputs.map(input => goalCounter(input, scoringDraft, prefix, mode)).join("")}</div>${group.diagram || ""}</div></section>`).join("");
 }
 
 function loadMatch(id, save = true, phase = state.selectedPhase) {
@@ -544,9 +628,10 @@ function updateCalculator(container, scoringDraft, totalOutput, bagOutput) {
   });
   scoringDraft.goals = goals;
   const placed = inputs.reduce((sum, input) => sum + valueOf(input), 0);
+  const exceedsInputMax = inputs.some(input => input.dataset.goalMax !== "" && Number.isFinite(valueOf(input)) && valueOf(input) > Number(input.dataset.goalMax));
   bagOutput.textContent = `${Number.isFinite(placed) ? placed : "--"}${maxObjects ? ` / ${maxObjects}` : ""} ${objects}`;
   let valid = false;
-  try { scoringDraft.counts = Core.goalCounts(goals); totalOutput.textContent = Core.score(scoringDraft.counts); valid = true; }
+  try { if (exceedsInputMax) throw new Error("This input exceeds its mode limit."); scoringDraft.counts = Core.goalCounts(goals); totalOutput.textContent = Core.score(scoringDraft.counts); valid = true; }
   catch { totalOutput.textContent = "--"; }
   container.querySelectorAll("[data-group-total]").forEach(output => {
     const total = [...output.closest(".goal-group").querySelectorAll("[data-goal-path]")].reduce((sum, input) => sum + valueOf(input) * Number(input.dataset.goalPoints), 0);
@@ -556,7 +641,8 @@ function updateCalculator(container, scoringDraft, totalOutput, bagOutput) {
     const input = get(button.dataset.counter);
     const value = Number(input.value);
     const increasing = Number(button.dataset.step) > 0;
-    button.disabled = !Number.isInteger(value) || value < 0 || (increasing ? !Number.isFinite(placed) || (maxObjects && placed >= maxObjects) : value === 0);
+    const inputMax = input.dataset.goalMax === "" ? maxObjects : Number(input.dataset.goalMax);
+    button.disabled = !Number.isInteger(value) || value < 0 || (increasing ? !Number.isFinite(placed) || (maxObjects && placed >= maxObjects) || (Number.isFinite(inputMax) && value >= inputMax) : value === 0);
   });
   bagOutput.classList.toggle("score-invalid", !valid);
   return valid;
@@ -588,7 +674,7 @@ function updateTimer() {
   const seconds = Math.ceil(Math.min(MATCH_MS, remaining) / 1000);
   get("timer").textContent = clockText(remaining);
   get("timer-dial").style.setProperty("--timer-progress-angle", timerProgressAngle(remaining));
-  get("timer-stage").classList.toggle("warning", seconds > 0 && seconds * 1000 <= Core.TIMING.driverSwitch.openMs);
+  get("timer-stage").classList.toggle("warning", seconds > 0 && Core.TIMING.driverSwitch !== null && seconds * 1000 <= Core.TIMING.driverSwitch.openMs);
   get("timer-stage").classList.toggle("ended", seconds === 0);
   get("timer-label").textContent = seconds === 0 ? "MATCH COMPLETE" : deadline !== null ? (inSwitchWindow(seconds * 1000) ? "DRIVER SWITCH WINDOW" : "MATCH IN PROGRESS") : remaining === MATCH_MS ? "READY FOR MATCH" : "MATCH PAUSED";
   if (remaining > MATCH_MS && get("timer-countdown").checked) get("timer-label").textContent = `STARTING IN ${globalThis.TimerAudio.countdownNumber(remaining - MATCH_MS)}`;
@@ -784,6 +870,10 @@ document.querySelectorAll("[data-analysis-sort]").forEach(button => button.addEv
   renderHistory();
 }));
 get("analysis-source").addEventListener("change", renderHistory);
+get("v5-analysis-team").addEventListener("change", event => {
+  analysisTeam = event.target.value || null;
+  renderTeamAnalysis(ACTIVE_GAME.practiceOnly ? state.teams : analysisRanking());
+});
 get("team-analysis-robot").addEventListener("change", event => { analysisRobot = event.target.value; renderTeamAnalysis(); });
 get("close-team-analysis").addEventListener("click", () => {
   const previous = analysisTeam;
@@ -1187,7 +1277,8 @@ get("exit-student-preview").addEventListener("click", async () => {
   if (!(await ask("Exit student preview? Practice runs and reviews created in the preview will be discarded.", "Exit preview", true))) return;
   await reloadEvent(false);
 });
-try { if (localStorage.getItem("level-up-sound") === "off") get("sound").checked = false; } catch {}
+const iqPreference = name => localStorage.getItem(`iq-${name}`) ?? localStorage.getItem(`${Game.LEGACY_GAME_ID}-${name}`);
+try { if (iqPreference("sound") === "off") get("sound").checked = false; } catch {}
 const syncSoundButtons = () => document.querySelectorAll(".timer-sound-toggle").forEach(button => {
   const enabled = get("sound").checked;
   button.setAttribute("aria-pressed", String(enabled));
@@ -1196,7 +1287,7 @@ const syncSoundButtons = () => document.querySelectorAll(".timer-sound-toggle").
   button.querySelector(".sound-icon-off").toggleAttribute("hidden", enabled);
 });
 get("sound").addEventListener("change", () => {
-  try { localStorage.setItem("level-up-sound", get("sound").checked ? "on" : "off"); } catch {}
+  try { localStorage.setItem("iq-sound", get("sound").checked ? "on" : "off"); } catch {}
   syncSoundButtons();
 });
 document.querySelectorAll(".timer-sound-toggle").forEach(button => button.addEventListener("click", () => {
@@ -1204,8 +1295,8 @@ document.querySelectorAll(".timer-sound-toggle").forEach(button => button.addEve
   get("sound").dispatchEvent(new Event("change", { bubbles: true }));
 }));
 syncSoundButtons();
-try { if (localStorage.getItem("level-up-countdown") === "off") get("timer-countdown").checked = false; } catch {}
-get("timer-countdown").addEventListener("change", () => { try { localStorage.setItem("level-up-countdown", get("timer-countdown").checked ? "on" : "off"); } catch {} });
+try { if (iqPreference("countdown") === "off") get("timer-countdown").checked = false; } catch {}
+get("timer-countdown").addEventListener("change", () => { try { localStorage.setItem("iq-countdown", get("timer-countdown").checked ? "on" : "off"); } catch {} });
 get("export-backup").addEventListener("click", async () => {
   if ((dirty || globalThis.SkillsUI?.isDirty() || globalThis.PracticeUI?.isDirty() || globalThis.RubricUI?.isDirty() || globalThis.InterviewUI?.isDirty()) && !(await ask("Unposted scores and unsaved evaluations are not included in backups. Export saved data anyway?", "Export anyway"))) return;
   download(JSON.stringify(state, null, 2), fileName("event.json"), "application/json");
@@ -1387,15 +1478,41 @@ async function initializeStorage() {
 // Fills game-specific labels, links, and limits in the page from the active game definition.
 function applyGame() {
   const { name, program, season, manual, fieldImage } = ACTIVE_GAME;
+  document.body.classList.toggle("practice-only", ACTIVE_GAME.practiceOnly === true);
   document.title = `${name} | ${document.title}`;
+  document.querySelector('[data-tab="analysis"]').textContent = ACTIVE_GAME.practiceOnly ? "Analysis" : "Cumulative leaderboard";
+  document.querySelector("#analysis-view .section-heading h2").textContent = ACTIVE_GAME.practiceOnly ? "Team analysis" : "Cumulative leaderboard";
+  get("access-permissions-note").textContent = ACTIVE_GAME.program === "VEX V5"
+    ? "Everyone listed here has the same editing permissions, including access management. Other signed-in users can view results only. Changes take effect the next time a person opens or saves."
+    : "Coaches can use all parts of the app. Team members can save practice runs, view leaderboards, and review any team's notebook or interview. They can read feedback for their team and reviews they wrote, and edit or delete only their own student reviews. Only coach reviews count toward the Cumulative leaderboard. Other visitors can view results only.";
+  get("settings-access-hint").textContent = ACTIVE_GAME.program === "VEX V5"
+    ? "Add or remove the Google accounts that can edit this app. Every listed account has the same access."
+    : "Choose who can score as a coach or team member.";
   document.querySelectorAll("[data-game-name]").forEach(element => { element.textContent = element.closest(".brand") ? name.toUpperCase() : name; });
+  document.querySelector(".brand small").textContent = ACTIVE_GAME.brandLabel || "LOCAL MATCH MANAGER";
+  document.querySelector("[data-game-disclaimer]").textContent = ACTIVE_GAME.disclaimer || "Created for North Union Vex IQ. Not an official VEX tool.";
   document.querySelectorAll("[data-game-season]").forEach(element => { element.textContent = `${program} / ${season}`; });
   document.querySelectorAll("[data-game-manual]").forEach(link => { link.href = manual.url; link.textContent = `${manual.label} \u2197`; });
   document.querySelectorAll("[data-game-rule]").forEach(link => { const rule = manual.rules[link.dataset.gameRule]; if (rule) link.href = `${manual.url}#${rule.anchor}`; });
   document.querySelectorAll("[data-game-rule-label]").forEach(element => { const rule = manual.rules[element.dataset.gameRuleLabel]; if (rule) element.textContent = rule.label; });
-  document.querySelectorAll("[data-game-field]").forEach(image => { if (!image.getAttribute("src").startsWith("data:")) image.src = fieldImage; image.alt = `${name} game field`; });
+  document.querySelectorAll("[data-game-field]").forEach(image => { if (fieldImage) { if (!image.getAttribute("src").startsWith("data:")) image.src = fieldImage; image.alt = `${name} game field`; } else image.hidden = true; });
   document.querySelectorAll("[data-game-seconds]").forEach(input => { input.max = MATCH_MS / 1000; });
   document.querySelectorAll("[data-game-clock]").forEach(output => { output.textContent = clockText(MATCH_MS); });
+  if (ACTIVE_GAME.practiceOnly) {
+    const setupTab = document.querySelector('[data-tab="setup"]');
+    setupTab.childNodes[0].textContent = "Teams ";
+    get("practice-team-field").firstChild.textContent = "Red team";
+    get("practice-partner-field").firstChild.textContent = "Red partner";
+    get("practice-view").querySelector("h2").textContent = "Practice";
+    get("practice-view").querySelector(".eyebrow").textContent = "VEX V5 PRACTICE";
+    get("practice-intro-note").textContent = "Run solo Driver or Autonomous Skills practice, or a paired Teamwork practice run. Record field results after each run.";
+    get("practice-history-note").textContent = "Latest 100 saved practice runs. Teamwork runs record both teams; Skills runs record one team. Student-entered runs are labeled in the history.";
+    document.querySelector("#setup-view .schedule-builder").hidden = true;
+    get("practice-bag-total").hidden = true;
+    get("practice-mode").querySelectorAll("option").forEach(option => { option.hidden = !ACTIVE_GAME.practice?.modes.includes(option.value); });
+    get("settings-event-data").querySelector(".settings-heading").textContent = "Practice data";
+    get("backup-hint").textContent = "Backups include the team roster, practice runs, and reviews.";
+  }
 }
 applyGame();
 initializeStorage();

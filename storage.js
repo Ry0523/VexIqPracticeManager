@@ -1,3 +1,4 @@
+/** Persistence boundary: Apps Script RPC when shared, otherwise local IndexedDB. */
 (function (root) {
   "use strict";
   let connection;
@@ -46,6 +47,11 @@
         conflicted = false;
         previewing = false;
         return response.event === null ? undefined : response.event;
+      },
+      async loadOfficialSkillsStandings() {
+        const response = JSON.parse(await call("loadOfficialSkillsStandingsJson"));
+        if (!response.ok) throw new Error(response.message || "Could not refresh official skills standings.");
+        return response;
       },
       async previewMember(team) {
         await queue;
@@ -133,7 +139,7 @@
 
   function open() {
     if (!connection) connection = new Promise((resolve, reject) => {
-      const request = root.indexedDB.open("level-up-match-manager", 1);
+      const request = root.indexedDB.open(localDatabaseName, 1);
       request.onupgradeneeded = () => request.result.createObjectStore("events");
       request.onerror = () => reject(request.error);
       request.onblocked = () => reject(new Error("Database upgrade blocked. Close other match manager tabs and reload."));
@@ -150,7 +156,8 @@
   // the write transaction, so a second tab can never silently replace newer scores.
   let revision;
   let conflicted = false;
-  const channel = typeof root.BroadcastChannel === "function" ? new root.BroadcastChannel("level-up-match-manager") : null;
+  const localDatabaseName = `${root.VexGame?.ACTIVE_GAME_ID || "level-up"}-match-manager`;
+  const channel = typeof root.BroadcastChannel === "function" ? new root.BroadcastChannel(localDatabaseName) : null;
   if (channel) channel.onmessage = message => {
     if (message.data?.type === "saved" && message.data.revision !== revision) root.EventStorage.onexternalchange?.();
   };

@@ -1,11 +1,18 @@
+/** Validates event/backup state and rolls a session into another registered game. */
 (function (root) {
   "use strict";
-  const Core = typeof module !== "undefined" && module.exports ? require("./core.js") : root.MatchCore;
+  const Core = typeof module !== "undefined" && module.exports ? require("./event-rules.js") : root.EventRules;
   const History = typeof module !== "undefined" && module.exports ? require("./history.js") : root.ScoreHistory;
   const Rubric = typeof module !== "undefined" && module.exports ? require("./rubric.js") : root.NotebookRubric;
   const Finals = typeof module !== "undefined" && module.exports ? require("./finals.js") : root.FinalsModel;
   const Game = Core.Game;
 
+  /**
+   * Normalize supported legacy fields, then validate every event-owned collection.
+  * @param {Record<string, unknown>} candidate Parsed event or backup payload.
+  * @returns {import("./types").EventState} Normalized, validated event; supported missing fields may be filled in.
+   * @throws {Error} If any event or nested record violates its schema.
+   */
   function validate(candidate) {
     if (!candidate || candidate.version !== 1 || typeof candidate.name !== "string" || candidate.name.length > 80 || !Array.isArray(candidate.teams) || candidate.teams.length > 200 || !Array.isArray(candidate.matches) || candidate.matches.length > 6000) throw new Error("This is not a valid event backup.");
     if (candidate.game === undefined) candidate.game = Game.LEGACY_GAME_ID;
@@ -49,11 +56,18 @@
     Rubric.Interview.validate(candidate.interviews);
     if (candidate.robots === undefined) candidate.robots = [];
     History.validateRobots(candidate.robots);
+    delete candidate.officialTeamData;
     return History.initialize(candidate);
   }
 
   // Moves a validated event to another game. Each season has new teams, so the roster, robot versions,
   // schedule, finals, and skills are cleared; game-tagged score history and evaluations are kept for analysis.
+  /**
+   * Start a clean event for gameId while retaining game-tagged history and evaluations.
+  * @param {import("./types").EventState} candidate Validated current event.
+   * @param {string} [gameId=Game.ACTIVE_GAME_ID] Registered destination game ID.
+  * @returns {import("./types").EventState} The original event when already in that game; otherwise a new empty event shell preserving its history.
+   */
   function rollover(candidate, gameId = Game.ACTIVE_GAME_ID) {
     if (candidate.game === gameId) return candidate;
     Game.get(gameId);

@@ -1,3 +1,4 @@
+/** Apps Script RPC/server entry points; authorization and persistence remain server-enforced. */
 function doGet() {
   const output = HtmlService.createHtmlOutputFromFile("Index")
     .setTitle(`${globalThis.VexGame ? globalThis.VexGame.active.name : "VEX IQ"} | Shared Match Manager`);
@@ -31,6 +32,8 @@ function eventSheet_() {
 const ACCESS_SHEET = "Access";
 const ACCESS_HEADERS = ["Email", "Role", "Team", "Updated by", "Updated at (UTC)", "Name"];
 const ROLES = ["coach", "member"];
+const UNIFIED_ACCESS_PROGRAM = "VEX V5";
+const unifiedAccess_ = () => globalThis.VexGame?.active?.program === UNIFIED_ACCESS_PROGRAM;
 
 function editorDomain_() {
   return String(PropertiesService.getScriptProperties().getProperty("EDITOR_DOMAIN") || "nu-district.org").trim().toLowerCase().replace(/^@/, "");
@@ -43,8 +46,8 @@ function normalizeAccess_(entry, domain) {
   const team = String(entry && entry.team || "").trim().toUpperCase();
   if (name.length > 80 || !domain || email.length > 254 || !/^[a-z0-9._%+'-]+@[a-z0-9.-]+$/.test(email) || !email.endsWith(`@${domain}`)) return null;
   if (!ROLES.includes(role)) return null;
-  if (role === "member" && !/^[A-Z0-9-]{1,20}$/.test(team)) return null;
-  return { name, email, role, team: role === "member" ? team : "" };
+  if ((role === "member" || (unifiedAccess_() && team)) && !/^[A-Z0-9-]{1,20}$/.test(team)) return null;
+  return { name, email, role, team: role === "member" || unifiedAccess_() ? team : "" };
 }
 
 // Rows edited by hand in the Access sheet that are incomplete or invalid are ignored rather than blocking everyone.
@@ -69,7 +72,7 @@ function access_() {
     if (email === owner) role = "coach";
     else {
       const entry = accessList_(domain).find(item => item.email === email);
-      if (entry) { role = entry.role; team = entry.team; }
+      if (entry) { role = unifiedAccess_() ? "coach" : entry.role; team = unifiedAccess_() || role === "member" ? entry.team : ""; }
     }
   }
   return { email, domain, owner, role, team, canEdit: role !== "viewer" };
@@ -81,6 +84,13 @@ function publicAccess_(access) {
 
 const blankFeedback_ = entry => ({ ...entry, ...(entry.authorEmail !== undefined ? { authorEmail: "" } : {}), reviewer: "", overallNotes: "", notes: Object.fromEntries(Object.keys(entry.notes).map(id => [id, ""])) });
 
+function redactedEventNotes_(event) {
+  return {
+    robots: event.robots.map(robot => ({ ...robot, notes: "" })),
+    history: event.history.map(record => typeof record.notes === "string" ? { ...record, notes: "" } : record)
+  };
+}
+
 // Viewers see results only: coaching text (rubric notes, reviewers, practice and robot notes) never leaves the server.
 function viewerCopy_(event) {
   if (!event) return event;
@@ -88,8 +98,7 @@ function viewerCopy_(event) {
     ...event,
     rubrics: event.rubrics.map(blankFeedback_),
     interviews: event.interviews.map(blankFeedback_),
-    robots: event.robots.map(robot => ({ ...robot, notes: "" })),
-    history: event.history.map(record => typeof record.notes === "string" ? { ...record, notes: "" } : record)
+    ...redactedEventNotes_(event)
   };
 }
 
@@ -97,7 +106,7 @@ function viewerCopy_(event) {
 function memberCopy_(event, team, email = "") {
   if (!event) return event;
   const own = entry => entry.team.id === team || (entry.reviewRole === "member" && email && entry.authorEmail === email) ? entry : blankFeedback_(entry);
-  return { ...event, rubrics: event.rubrics.map(own), interviews: event.interviews.map(own) };
+  return { ...event, rubrics: event.rubrics.map(own), interviews: event.interviews.map(own), ...redactedEventNotes_(event) };
 }
 
 // Coaches get the full event.
@@ -166,6 +175,15 @@ function memberSave_(stored, candidate, team, email = "") {
     if (record.runRole !== "member") throw new Error("Student practice runs must be marked as student runs and cannot count toward leaderboards.");
     used.add(key);
   }
+  const storedHistory = new Map(stored.history.map(record => [record.id, record]));
+  candidate = {
+    ...candidate,
+    robots: stored.robots,
+    history: candidate.history.map(record => {
+      const previous = storedHistory.get(record.id);
+      return previous && typeof previous.notes === "string" ? { ...record, notes: previous.notes } : record;
+    })
+  };
   return candidate;
 }
 
@@ -242,6 +260,45 @@ function loadEvent() {
 
 function loadEventJson() {
   return JSON.stringify(loadEvent());
+}
+
+function loadOfficialSkillsStandingsJson() {
+  const config = globalThis.VexGame?.active?.officialStandings;
+  if (!config?.apiUrl || !Array.isArray(config.groups)) throw new Error("Official skills standings are not configured for this game.");
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `officialSkillsStandings:${globalThis.VexGame.active.id}:${digest_(JSON.stringify(config))}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  const teams = {};
+  config.groups.forEach(group => {
+    const apiUrl = `${config.apiUrl}&grade_level=${encodeURIComponent(group.gradeLevel)}`;
+    const response = UrlFetchApp.fetch(apiUrl, { muteHttpExceptions: true, headers: { Accept: "application/json" } });
+    if (response.getResponseCode() !== 200) throw new Error(`VEX ${group.gradeLevel} skills standings returned HTTP ${response.getResponseCode()}.`);
+    const records = JSON.parse(response.getContentText());
+    if (!Array.isArray(records)) throw new Error(`VEX ${group.gradeLevel} skills standings returned an invalid response.`);
+    const ohioRows = records.filter(record => record?.team?.country === config.country && record.team.region === config.region && record.team.gradeLevel === group.gradeLevel)
+      .sort((left, right) => Number(left.rank) - Number(right.rank));
+    ohioRows.forEach((record, index) => {
+      const team = record.team.team;
+      if (typeof team !== "string" || !team.startsWith(group.teamPrefix) || !record.scores) return;
+      const scores = record.scores;
+      teams[team] = {
+        gradeLevel: group.gradeLevel,
+        row: index + 1,
+        rank: Number(record.rank),
+        score: Number(scores.score),
+        autonomous: Number(scores.programming),
+        driver: Number(scores.driver),
+        highestAutonomous: Number(scores.maxProgramming),
+        highestDriver: Number(scores.maxDriver),
+        sourceUrl: `${config.sourceUrl}?search=${encodeURIComponent(team)}&event_region=&country=${config.countryId}&region=${config.regionId}&grade_level=${encodeURIComponent(group.gradeLevel)}`
+      };
+    });
+  });
+  const result = JSON.stringify({ ok: true, capturedAt: new Date().toISOString(), sourceUrl: config.sourceUrl, teams });
+  try { cache.put(cacheKey, result, 300); }
+  catch (error) { console.warn(`Official standings could not be cached: ${error.message}`); }
+  return result;
 }
 
 function previewMemberJson(team) {
@@ -359,7 +416,7 @@ function saveEvent(request) {
 
 function requireCoach_() {
   const access = access_();
-  if (access.role !== "coach") throw new Error("Only coaches can manage app access.");
+  if (access.role !== "coach") throw new Error("Only authorized editors can manage app access.");
   return access;
 }
 

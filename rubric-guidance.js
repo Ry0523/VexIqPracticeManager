@@ -1,3 +1,4 @@
+/** Original coaching summaries indexed by rubric criterion and rating level. */
 (function (root) {
   "use strict";
   // Coaching summaries, not official rubric descriptors. Arrays run from lowest to highest rating.

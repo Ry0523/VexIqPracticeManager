@@ -1,3 +1,4 @@
+/** Skills-attempt UI: attempt selection, eligibility, Stop Time, and timer-driven posting. */
 (function () {
   "use strict";
   let selection = { team: null, mode: "driver", attempt: 1 };
