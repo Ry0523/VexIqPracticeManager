@@ -5,38 +5,82 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const names = ["countdown-3", "countdown-2", "countdown-1", "start", "switch-open", "switch-close", "end"];
-const data = Object.fromEntries(names.map(name => [name, fs.readFileSync(path.join(__dirname, `timer-${name}.wav`)).toString("base64")]));
+const data = Object.fromEntries(
+  names.map((name) => [name, fs.readFileSync(path.join(__dirname, `timer-${name}.wav`)).toString("base64")]),
+);
 
 function timer(options = {}) {
-  const scheduled = [], errors = [], gains = [];
-  const sound = { checked: true, addEventListener(type, handler) { this.change = handler; } };
+  const scheduled = [],
+    errors = [],
+    gains = [];
+  const sound = {
+    checked: true,
+    addEventListener(type, handler) {
+      this.change = handler;
+    },
+  };
   const countdown = { checked: true };
   let performanceTime = 5000;
   const audio = {
-    state: "running", currentTime: 5, baseLatency: 0.02,
+    state: "running",
+    currentTime: 5,
+    baseLatency: 0.02,
     resume: options.resume || (async () => {}),
     getOutputTimestamp: () => ({ contextTime: audio.currentTime - 0.05, performanceTime }),
-    createGain() { const gain = { gain: { value: 1 }, connect() {} }; gains.push(gain); return gain; },
+    createGain() {
+      const gain = { gain: { value: 1 }, connect() {} };
+      gains.push(gain);
+      return gain;
+    },
     createBuffer(channels, length, rate) {
       const samples = new Float32Array(length);
       return { duration: length / rate, getChannelData: () => samples, length, sampleRate: rate };
     },
     createBufferSource() {
-      const source = { connect() {}, disconnect() {}, stopped: false, stop() { this.stopped = true; }, start(time, offset, duration) { this.time = time; this.offset = offset; this.duration = duration; scheduled.push(this); } };
+      const source = {
+        connect() {},
+        disconnect() {},
+        stopped: false,
+        stop() {
+          this.stopped = true;
+        },
+        start(time, offset, duration) {
+          this.time = time;
+          this.offset = offset;
+          this.duration = duration;
+          scheduled.push(this);
+        },
+      };
       return source;
-    }
+    },
   };
   const context = vm.createContext({
-    AudioContext: function () { return audio; }, TimerSoundData: data,
-    atob: value => Buffer.from(value, "base64").toString("binary"),
-    setTimeout: options.setTimeout || setTimeout, clearTimeout,
+    AudioContext: function () {
+      return audio;
+    },
+    TimerSoundData: data,
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
+    setTimeout: options.setTimeout || setTimeout,
+    clearTimeout,
     performance: { now: () => performanceTime },
-    document: { getElementById: id => id === "timer-countdown" ? countdown : sound },
-    timerAudioError: error => errors.push(error),
-    MatchCore: require("./core.js")
+    document: { getElementById: (id) => (id === "timer-countdown" ? countdown : sound) },
+    timerAudioError: (error) => errors.push(error),
+    MatchCore: require("./core.js"),
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, "timer-audio.js"), "utf8"), context);
-  return { api: context.TimerAudio, scheduled, errors, sound, countdown, gains, audio, advance(seconds) { audio.currentTime += seconds; performanceTime += seconds * 1000; } };
+  return {
+    api: context.TimerAudio,
+    scheduled,
+    errors,
+    sound,
+    countdown,
+    gains,
+    audio,
+    advance(seconds) {
+      audio.currentTime += seconds;
+      performanceTime += seconds * 1000;
+    },
+  };
 }
 
 test("all cues are scheduled before any visual timer ticks, with an exact full minute", async () => {
@@ -73,12 +117,16 @@ test("disabling the countdown starts the run immediately without countdown cues"
 test("the final beat flows into the full, unclipped start sound without a seam", async () => {
   const { api, scheduled } = timer();
   await api.start(60000, true, true);
-  const samples = name => {
+  const samples = (name) => {
     const bytes = Buffer.from(data[name], "base64");
     const offset = bytes.indexOf("data") + 8;
-    return Array.from({ length: bytes.readUInt32LE(offset - 4) / 2 }, (_, index) => bytes.readInt16LE(offset + index * 2) / 32768);
+    return Array.from(
+      { length: bytes.readUInt32LE(offset - 4) / 2 },
+      (_, index) => bytes.readInt16LE(offset + index * 2) / 32768,
+    );
   };
-  const beat = samples("countdown-1"), start = samples("start");
+  const beat = samples("countdown-1"),
+    start = samples("start");
   const joined = scheduled[2].buffer.getChannelData(0);
   assert.equal(joined.length, beat.length + start.length);
   assert.equal(beat.length, 7079);
@@ -131,7 +179,7 @@ test("a second run counts down even when Android audio timestamps stop advancing
   advance(7.14);
   audio.currentTime = frozenAudioTime;
   assert.ok(Math.abs(api.now() - initial - 7140) < 1e-6);
-  assert.ok(Math.abs((end - api.now()) - (end - initial - 7140)) < 1e-6);
+  assert.ok(Math.abs(end - api.now() - (end - initial - 7140)) < 1e-6);
   assert.equal(api.isStarting(), false);
 });
 
@@ -150,12 +198,12 @@ test("reset cancels every queued cue and early finish replaces future cues with 
   const { api, scheduled } = timer();
   await api.start(60000, true);
   api.stop();
-  assert.ok(scheduled.every(source => source.stopped));
+  assert.ok(scheduled.every((source) => source.stopped));
   await api.start(60000, true);
   const before = scheduled.length;
   api.finish();
   assert.equal(scheduled.length, before + 1);
-  assert.ok(scheduled.slice(0, before).every(source => source.stopped));
+  assert.ok(scheduled.slice(0, before).every((source) => source.stopped));
   api.finish();
   assert.equal(scheduled.length, before + 1);
 });
@@ -171,16 +219,23 @@ test("resuming near a boundary does not overlap the start signal with the next c
 test("mute changes gain without rescheduling or replaying past cues", async () => {
   const { api, scheduled, sound, gains } = timer();
   await api.start(60000, true);
-  sound.checked = false; sound.change();
+  sound.checked = false;
+  sound.change();
   assert.equal(gains[0].gain.value, 0);
-  sound.checked = true; sound.change();
+  sound.checked = true;
+  sound.change();
   assert.equal(gains[0].gain.value, 1);
   assert.equal(scheduled.length, 6);
 });
 
 test("timer waits for audio readiness and pending starts can be cancelled", async () => {
   let ready;
-  const { api, scheduled } = timer({ resume: () => new Promise(resolve => { ready = resolve; }) });
+  const { api, scheduled } = timer({
+    resume: () =>
+      new Promise((resolve) => {
+        ready = resolve;
+      }),
+  });
   const pending = api.start(60000, true);
   assert.equal(api.isStarting(), true);
   assert.equal(scheduled.length, 0);
@@ -193,7 +248,12 @@ test("timer waits for audio readiness and pending starts can be cancelled", asyn
 
 test("slow audio startup does not consume any countdown or run time", async () => {
   let ready;
-  const { api, audio, advance, scheduled } = timer({ resume: () => new Promise(resolve => { ready = resolve; }) });
+  const { api, audio, advance, scheduled } = timer({
+    resume: () =>
+      new Promise((resolve) => {
+        ready = resolve;
+      }),
+  });
   audio.state = "suspended";
   const pending = api.start(60000, true);
   advance(10);
@@ -211,12 +271,17 @@ test("initially muted playback keeps the same timeline and can be unmuted", asyn
   await api.start(60000, true);
   assert.equal(gains[0].gain.value, 0);
   assert.equal(scheduled.length, 6);
-  sound.checked = true; sound.change();
+  sound.checked = true;
+  sound.change();
   assert.equal(gains[0].gain.value, 1);
 });
 
 test("audio failure explicitly warns and preserves a monotonic visual timer", async () => {
-  const { api, scheduled, errors, advance } = timer({ resume: async () => { throw new Error("Playback blocked"); } });
+  const { api, scheduled, errors, advance } = timer({
+    resume: async () => {
+      throw new Error("Playback blocked");
+    },
+  });
   const end = await api.start(60000, true);
   assert.equal(end, 67384);
   assert.equal(scheduled.length, 0);
@@ -229,7 +294,10 @@ test("audio failure explicitly warns and preserves a monotonic visual timer", as
 test("blocked audio readiness times out explicitly instead of leaving controls stuck", async () => {
   const { api, errors, scheduled } = timer({
     resume: () => new Promise(() => {}),
-    setTimeout: callback => { queueMicrotask(callback); return undefined; }
+    setTimeout: (callback) => {
+      queueMicrotask(callback);
+      return undefined;
+    },
   });
   assert.equal(await api.start(60000, true), 67384);
   assert.equal(api.isStarting(), false);
@@ -243,7 +311,7 @@ test("decoded recording clips have at most 2ms of leading quiet samples plus a 2
   await api.start(60000, true);
   for (const source of scheduled) {
     const samples = source.buffer.getChannelData(0);
-    const onset = samples.findIndex(sample => Math.abs(sample) >= 0.01);
+    const onset = samples.findIndex((sample) => Math.abs(sample) >= 0.01);
     assert.ok(onset >= 0 && onset <= Math.round(source.buffer.sampleRate * 0.004));
     assert.ok(source.buffer.duration > 0.1);
   }

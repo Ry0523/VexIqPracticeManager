@@ -19,7 +19,7 @@ async function autoConfirm(page) {
 // Native alert/confirm/prompt dialogs are reported as errors: in the Apps Script frame Android labels them
 // "An embedded page at ... says".
 function rejectNativeDialogs(page, errors) {
-  page.on("dialog", dialog => {
+  page.on("dialog", (dialog) => {
     if (dialog.type() === "beforeunload") return dialog.accept();
     errors.push(`Native ${dialog.type()} dialog: ${dialog.message()}`);
     return dialog.dismiss();
@@ -29,7 +29,7 @@ function rejectNativeDialogs(page, errors) {
 // Each test gets a fresh browser context, so IndexedDB starts empty.
 async function openApp(page) {
   const errors = [];
-  page.on("pageerror", error => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push(error.message));
   rejectNativeDialogs(page, errors);
   await autoConfirm(page);
   await page.goto("/index.html");
@@ -54,7 +54,10 @@ async function schedule(page, teams, rounds = 6) {
 
 // Removes Web Audio so the timer uses its visual-only clock, and fakes time so a 60-second match runs instantly.
 async function useFakeTimerClock(page) {
-  await page.addInitScript(() => { delete window.AudioContext; delete window.webkitAudioContext; });
+  await page.addInitScript(() => {
+    delete window.AudioContext;
+    delete window.webkitAudioContext;
+  });
   await page.clock.install();
 }
 

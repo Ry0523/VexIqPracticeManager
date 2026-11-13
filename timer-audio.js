@@ -12,16 +12,41 @@
   let clock = null;
   // Countdown beats, in milliseconds before the run starts, matching the recorded official timer: the beats are
   // 0.75 s apart and the start sound plays the instant the clock begins at 1:00.
-  const COUNTDOWN = Object.freeze([["countdown-3", 2384], ["countdown-2", 1634], ["countdown-1", 884]]);
+  const COUNTDOWN = Object.freeze([
+    ["countdown-3", 2384],
+    ["countdown-2", 1634],
+    ["countdown-1", 884],
+  ]);
   const COUNTDOWN_MS = COUNTDOWN[0][1];
   const LEAD_IN = "countdown-start";
   // The number to show while counting down (3, 2, or 1), given the time left before the run starts.
-  const countdownNumber = msBeforeStart => Math.min(COUNTDOWN.length, COUNTDOWN.length + 1 - COUNTDOWN.filter(([, at]) => at >= msBeforeStart).length);
+  /**
+   * Countdown digit to display.
+   *
+   * @param {number} msBeforeStart - Milliseconds until the run starts.
+   * @returns {number} Countdown digit to display.
+   */
+  const countdownNumber = (msBeforeStart) =>
+    Math.min(
+      COUNTDOWN.length,
+      COUNTDOWN.length + 1 - COUNTDOWN.filter(([, at]) => at >= msBeforeStart).length,
+    );
 
+  /**
+   * Reports the failure and leaves visual timing available.
+   *
+   * @param {Error} error - Audio preparation or playback failure.
+   * @returns {void} Reports the failure and leaves visual timing available.
+   */
   function report(error) {
     root.timerAudioError(`Timer sound could not play: ${error.message}. The visual timer remains active.`);
   }
 
+  /**
+   * Decodes timer clips, builds AudioBuffers, and connects the gain node.
+   *
+   * @returns {void} Decodes timer clips, builds AudioBuffers, and connects the gain node.
+   */
   function prepare() {
     if (buffers) return;
     const AudioContext = root.AudioContext || root.webkitAudioContext;
@@ -30,7 +55,7 @@
     context = next;
     const clips = new Map();
     for (const [name, encoded] of Object.entries(root.TimerSoundData)) {
-      const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+      const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
       const view = new DataView(bytes.buffer);
       let offset = 12;
       let format, data;
@@ -38,19 +63,37 @@
         const type = String.fromCharCode(...bytes.slice(offset, offset + 4));
         const size = view.getUint32(offset + 4, true);
         if (type === "fmt ") format = offset + 8;
-        if (type === "data") { data = { offset: offset + 8, size }; break; }
-        offset += 8 + size + size % 2;
+        if (type === "data") {
+          data = { offset: offset + 8, size };
+          break;
+        }
+        offset += 8 + size + (size % 2);
       }
-      if (!format || !data || view.getUint16(format, true) !== 1 || view.getUint16(format + 2, true) !== 1 || view.getUint16(format + 14, true) !== 16) throw new Error(`Unsupported timer audio format: ${name}`);
+      if (
+        !format ||
+        !data ||
+        view.getUint16(format, true) !== 1 ||
+        view.getUint16(format + 2, true) !== 1 ||
+        view.getUint16(format + 14, true) !== 16
+      )
+        throw new Error(`Unsupported timer audio format: ${name}`);
       const rate = view.getUint32(format + 4, true);
       const samples = new Float32Array(data.size / 2);
-      for (let index = 0; index < samples.length; index++) samples[index] = view.getInt16(data.offset + index * 2, true) / 32768;
+      for (let index = 0; index < samples.length; index++)
+        samples[index] = view.getInt16(data.offset + index * 2, true) / 32768;
       // Remove only leading silence; retain a short onset margin to avoid clipping transients.
-      let first = samples.findIndex(sample => Math.abs(sample) >= 0.01);
+      let first = samples.findIndex((sample) => Math.abs(sample) >= 0.01);
       first = Math.max(0, first - Math.round(rate * 0.002));
       clips.set(name, { samples: samples.subarray(first), rate });
     }
     // The clips were cut from one recording, so their edges fall mid-waveform; a 2 ms ramp keeps them from clicking.
+    /**
+     * Creates an audio buffer from decoded samples and applies a short de-click ramp.
+     *
+     * @param {{samples: Float32Array, rate: number}} clip Decoded mono audio clip.
+     * @param {boolean} [fadeStart=true] Whether to ramp in the first samples.
+     * @returns {AudioBuffer} Buffered clip ready for playback.
+     */
     const toBuffer = ({ samples, rate }, fadeStart = true) => {
       const buffer = next.createBuffer(1, samples.length, rate);
       const channel = buffer.getChannelData(0);
@@ -64,7 +107,8 @@
     };
     const decoded = new Map([...clips].map(([name, clip]) => [name, toBuffer(clip)]));
     // In the recording the final beat runs straight into the start sound, so a fresh run plays them as one seamless clip.
-    const last = clips.get(COUNTDOWN.at(-1)[0]), begin = clips.get("start");
+    const last = clips.get(COUNTDOWN.at(-1)[0]),
+      begin = clips.get("start");
     if (last.rate === begin.rate) {
       const joined = new Float32Array(last.samples.length + begin.samples.length);
       joined.set(last.samples);
@@ -77,6 +121,11 @@
     gain.connect(context.destination);
   }
 
+  /**
+   * Monotonic audio/display timeline in milliseconds.
+   *
+   * @returns {number} Monotonic audio/display timeline in milliseconds.
+   */
   function now() {
     if (clock) return clock.audioTime + performance.now() - clock.performanceTime;
     if (!context || fallback) return performance.now();
@@ -84,14 +133,29 @@
     if (output && output.performanceTime > 0) {
       return (output.contextTime + Math.max(0, performance.now() - output.performanceTime) / 1000) * 1000;
     }
-    return Math.max(0, context.currentTime - (context.outputLatency || 0) - (context.baseLatency || 0)) * 1000;
+    return (
+      Math.max(0, context.currentTime - (context.outputLatency || 0) - (context.baseLatency || 0)) * 1000
+    );
   }
 
+  /**
+   * Stops and disconnects every scheduled audio source.
+   *
+   * @returns {void} Stops and disconnects every scheduled audio source.
+   */
   function clearSources() {
-    for (const source of sources) { source.stop(); source.disconnect(); }
+    for (const source of sources) {
+      source.stop();
+      source.disconnect();
+    }
     sources = [];
   }
 
+  /**
+   * Cancels the current run and invalidates pending audio startup.
+   *
+   * @returns {void} Cancels the current run and invalidates pending audio startup.
+   */
   function stop() {
     generation++;
     starting = false;
@@ -100,6 +164,15 @@
     clock = null;
   }
 
+  /**
+   * Schedules one audio source.
+   *
+   * @param {string} name - Decoded timer clip key.
+   * @param {number} time - AudioContext start time in seconds.
+   * @param {number} [duration=Infinity] - Playback duration in seconds.
+   * @param {number} [offset=0] - Clip offset in seconds.
+   * @returns {void} Schedules one audio source.
+   */
   function schedule(name, time, duration = Infinity, offset = 0) {
     const source = context.createBufferSource();
     source.buffer = buffers.get(name);
@@ -111,6 +184,14 @@
     sources.push(source);
   }
 
+  /**
+   * Run deadline in milliseconds, or null if canceled during startup.
+   *
+   * @param {number} remaining - Remaining run time in milliseconds.
+   * @param {boolean} fresh - Whether this is a new run with optional countdown.
+   * @param {boolean} [driver=true] - Whether to schedule driver-switch cues.
+   * @returns {Promise<number|null>} Run deadline in milliseconds, or null if canceled during startup.
+   */
   async function start(remaining, fresh, driver = true) {
     stop();
     const token = generation;
@@ -124,10 +205,15 @@
         await Promise.race([
           context.resume(),
           new Promise((resolve, reject) => {
-            timeout = setTimeout(() => reject(new Error("Audio playback did not become ready; check browser audio permissions")), 3000);
-          })
+            timeout = setTimeout(
+              () => reject(new Error("Audio playback did not become ready; check browser audio permissions")),
+              3000,
+            );
+          }),
         ]);
-      } finally { clearTimeout(timeout); }
+      } finally {
+        clearTimeout(timeout);
+      }
       if (token !== generation) return null;
       if (context.state !== "running") throw new Error("Audio playback is blocked");
       fallback = false;
@@ -139,11 +225,18 @@
       end = (origin + duration / 1000) * 1000;
       const { openMs: switchOpen, closeMs: switchClose } = root.EventRules.TIMING.driverSwitch || {};
       const switching = driver;
-      const nextCue = switching && remaining > switchOpen ? remaining - switchOpen : switching && remaining > switchClose ? remaining - switchClose : remaining;
+      const nextCue =
+        switching && remaining > switchOpen
+          ? remaining - switchOpen
+          : switching && remaining > switchClose
+            ? remaining - switchClose
+            : remaining;
       const startAt = origin + (countdown ? COUNTDOWN_MS / 1000 : 0);
       const joined = countdown && buffers.has(LEAD_IN);
       const startCue = joined ? LEAD_IN : fresh && !countdown ? "start-from-beginning" : "start";
-      if (countdown) for (const [name, at] of joined ? COUNTDOWN.slice(0, -1) : COUNTDOWN) schedule(name, origin + (COUNTDOWN_MS - at) / 1000);
+      if (countdown)
+        for (const [name, at] of joined ? COUNTDOWN.slice(0, -1) : COUNTDOWN)
+          schedule(name, origin + (COUNTDOWN_MS - at) / 1000);
       if (joined) {
         const lead = COUNTDOWN.at(-1)[1] / 1000;
         schedule(LEAD_IN, startAt - lead, lead + nextCue / 1000);
@@ -162,9 +255,16 @@
       fallback = true;
       end = performance.now() + duration;
       return end;
-    } finally { if (token === generation) starting = false; }
+    } finally {
+      if (token === generation) starting = false;
+    }
   }
 
+  /**
+   * Stops future cues and plays the end cue immediately when possible.
+   *
+   * @returns {void} Stops future cues and plays the end cue immediately when possible.
+   */
   function finish() {
     clearSources();
     if (end === null) return;
@@ -175,5 +275,8 @@
   document.getElementById("sound").addEventListener("change", () => {
     if (gain) gain.gain.value = document.getElementById("sound").checked ? 1 : 0;
   });
+  /**
+   * @type {import("./types").TimerAudioApi} Public timer scheduler contract used by the UI controllers.
+   */
   root.TimerAudio = { start, now, stop, finish, countdownNumber, COUNTDOWN_MS, isStarting: () => starting };
 })(globalThis);

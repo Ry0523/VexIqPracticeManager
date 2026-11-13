@@ -9,26 +9,35 @@ test("notebook and interview rating choices are readable and selectable on phone
   await addTeams(page, [["1A", "One"]]);
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 800 });
-    for (const [tab, criterion, rating] of [["rubric", "navigation", "3"], ["interview", "own-work", "2"]]) {
+    for (const [tab, criterion, rating] of [
+      ["rubric", "navigation", "3"],
+      ["interview", "own-work", "2"],
+    ]) {
       await page.click(`[data-tab="${tab}"]`);
-      await expect(page.locator(`#${tab}-criteria .rubric-sample-questions`)).toHaveCount(tab === "rubric" ? 0 : 6);
+      await expect(page.locator(`#${tab}-criteria .rubric-sample-questions`)).toHaveCount(
+        tab === "rubric" ? 0 : 6,
+      );
       if (tab === "rubric") continue;
       const sampleQuestions = page.locator(`#${tab}-criteria .rubric-sample-questions`).first();
       await expect(sampleQuestions).toHaveCount(1);
       await sampleQuestions.locator("summary").click();
       await expect(sampleQuestions.locator("li")).toHaveCount(2);
       const guidance = page.locator(`#${tab}-guidance-${criterion}`);
-      const layout = await guidance.evaluate(element => {
+      const layout = await guidance.evaluate((element) => {
         const list = element.querySelector(".rubric-guidance-levels");
         const buttons = [...list.querySelectorAll("button")];
-        const rectangles = buttons.map(button => button.getBoundingClientRect());
+        const rectangles = buttons.map((button) => button.getBoundingClientRect());
         return {
           scrollWidth: list.scrollWidth,
           clientWidth: list.clientWidth,
-          fontSize: parseFloat(getComputedStyle(buttons[0].querySelector(".rubric-guidance-description")).fontSize),
-          stacked: rectangles.every((rectangle, index) => !index || rectangle.top >= rectangles[index - 1].bottom),
-          minHeight: Math.min(...rectangles.map(rectangle => rectangle.height)),
-          pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+          fontSize: parseFloat(
+            getComputedStyle(buttons[0].querySelector(".rubric-guidance-description")).fontSize,
+          ),
+          stacked: rectangles.every(
+            (rectangle, index) => !index || rectangle.top >= rectangles[index - 1].bottom,
+          ),
+          minHeight: Math.min(...rectangles.map((rectangle) => rectangle.height)),
+          pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
         };
       });
       expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
@@ -63,7 +72,9 @@ test("notebook guidance source switches and persists on this device", async ({ p
   await expect(criterionTitle).toHaveText("Information is easy to reference");
   await expect(link).toHaveAttribute("href", /engineering-notebook-rubric-A4-v2\.0\.pdf$/);
   await expect(guidance).toBeVisible();
-  await expect(guidance.locator(".rubric-guidance-description").first()).toHaveText("Pages are numbered, entries are ordered chronologically or by section, and a table of contents leads to specific entries.");
+  await expect(guidance.locator(".rubric-guidance-description").first()).toHaveText(
+    "Pages are numbered, entries are ordered chronologically or by section, and a table of contents leads to specific entries.",
+  );
   await expect(guidance.locator(".rubric-guidance-option")).toHaveCount(4);
   await expect(score).toHaveAttribute("type", "hidden");
   await expect(page.locator("#rubric-criteria select")).toHaveCount(0);
@@ -77,7 +88,9 @@ test("notebook guidance source switches and persists on this device", async ({ p
   await expect(page.locator('label[for="rubric-score-changes"]')).toHaveText("Why we changed things");
   await expect(link).toHaveAttribute("href", /student-friendly-engineering-notebook-rubric-a4-v2\.0\.pdf$/);
   await expect(link).toHaveText("Open Student-friendly rubric PDF");
-  await expect(guidance.locator(".rubric-guidance-description").first()).toHaveText("Our pages are numbered, our entries are in order (by date or by section), and our table of contents points to the exact page.");
+  await expect(guidance.locator(".rubric-guidance-description").first()).toHaveText(
+    "Our pages are numbered, our entries are in order (by date or by section), and our table of contents points to the exact page.",
+  );
   await expect(guidance.locator(".rubric-guidance-score")).toHaveText(["4", "3", "2", "1"]);
   await expect(guidance.locator(".rubric-guidance-level-label strong")).toHaveCount(0);
   await page.reload();
@@ -85,7 +98,9 @@ test("notebook guidance source switches and persists on this device", async ({ p
   await page.click('[data-tab="rubric"]');
   await expect(version).toHaveValue("student");
   await expect(link).toHaveAttribute("href", /student-friendly-engineering-notebook-rubric-a4-v2\.0\.pdf$/);
-  await expect(guidance.locator(".rubric-guidance-description").first()).toHaveText("Our pages are numbered, our entries are in order (by date or by section), and our table of contents points to the exact page.");
+  await expect(guidance.locator(".rubric-guidance-description").first()).toHaveText(
+    "Our pages are numbered, our entries are in order (by date or by section), and our table of contents points to the exact page.",
+  );
   await expect(guidance.locator(".rubric-guidance-score")).toHaveText(["4", "3", "2", "1"]);
   await expect(guidance.locator(".rubric-guidance-level-label strong")).toHaveCount(0);
 });
@@ -114,24 +129,36 @@ test("interview guidance source switches and persists independently from noteboo
     "How a part of the robot, code, or strategy works.",
     "Questions land with the student who can answer - no one has to explain everything.",
     "Why the team built it that way.",
-    "What they chose it over."
+    "What they chose it over.",
   ]);
-  await expect(page.locator("#interview-criteria .rubric-section-title").first()).toHaveText("Explain your learning");
+  await expect(page.locator("#interview-criteria .rubric-section-title").first()).toHaveText(
+    "Explain your learning",
+  );
 
   await version.selectOption("student");
   await expect(link).toHaveAttribute("href", /student-friendly-team-interview-rubric-a4-v2\.0\.pdf$/);
   await expect(link).toHaveText("Open Student-friendly rubric PDF");
   await expect(title).toHaveText("Explaining our own work");
-  await expect(guidance.locator('[data-guidance-score="2"] .rubric-guidance-description')).toHaveText("We can each pick a part of our robot, code, or game plan and explain how it works, why we built it that way, and what we picked it over.");
-  await expect(adaptationGuidance.locator('[data-guidance-score="2"] .rubric-guidance-description p')).toHaveText("When we borrow an idea from another team, a video, or a coach, we can say:");
-  await expect(adaptationGuidance.locator('[data-guidance-score="2"] .rubric-guidance-bullets li')).toHaveText([
+  await expect(guidance.locator('[data-guidance-score="2"] .rubric-guidance-description')).toHaveText(
+    "We can each pick a part of our robot, code, or game plan and explain how it works, why we built it that way, and what we picked it over.",
+  );
+  await expect(
+    adaptationGuidance.locator('[data-guidance-score="2"] .rubric-guidance-description p'),
+  ).toHaveText("When we borrow an idea from another team, a video, or a coach, we can say:");
+  await expect(
+    adaptationGuidance.locator('[data-guidance-score="2"] .rubric-guidance-bullets li'),
+  ).toHaveText([
     "Where it came from.",
     "What we changed to fit our robot.",
     "How we tested it.",
-    "Why it works."
+    "Why it works.",
   ]);
-  await expect(adaptationGuidance.locator('[data-guidance-score="2"] .rubric-guidance-bullets li').first()).toHaveCSS("display", "list-item");
-  await expect(page.locator("#interview-criteria .rubric-section-title").first()).toHaveText("How We Explain Our Work");
+  await expect(
+    adaptationGuidance.locator('[data-guidance-score="2"] .rubric-guidance-bullets li').first(),
+  ).toHaveCSS("display", "list-item");
+  await expect(page.locator("#interview-criteria .rubric-section-title").first()).toHaveText(
+    "How We Explain Our Work",
+  );
 
   await page.click('[data-tab="rubric"]');
   await expect(page.locator("#notebook-guidance-version")).toHaveValue("official");
@@ -152,27 +179,43 @@ test("coach can expand saved notebook review notes from the review list", async 
   await page.locator("#rubric-note-navigation").fill("Clear page numbers and a working contents page.");
   await page.click("#save-rubric");
 
-    await expect(page.locator("#rubric-previous-score-navigation")).toHaveText("Previous: 3/4");
-    const earlierNoteToggle = page.locator("#rubric-previous-note-toggle-navigation");
-    const earlierNote = page.locator("#rubric-previous-navigation");
-    await expect(earlierNoteToggle).toBeVisible();
-    const formHeight = await page.locator("#rubric-form").evaluate(form => form.getBoundingClientRect().height);
-    await earlierNoteToggle.click();
-    await expect(earlierNote).toBeVisible();
-    await expect(earlierNote).toContainText("Earlier note (2026-11-05): Clear page numbers and a working contents page.");
-    expect(await page.locator("#rubric-form").evaluate(form => form.getBoundingClientRect().height)).toBe(formHeight);
+  await expect(page.locator("#rubric-previous-score-navigation")).toHaveText("Previous: 3/4");
+  const earlierNoteToggle = page.locator("#rubric-previous-note-toggle-navigation");
+  const earlierNote = page.locator("#rubric-previous-navigation");
+  await expect(earlierNoteToggle).toBeVisible();
+  const formHeight = await page
+    .locator("#rubric-form")
+    .evaluate((form) => form.getBoundingClientRect().height);
+  await earlierNoteToggle.click();
+  await expect(earlierNote).toBeVisible();
+  await expect(earlierNote).toContainText(
+    "Earlier note (2026-11-05): Clear page numbers and a working contents page.",
+  );
+  expect(await page.locator("#rubric-form").evaluate((form) => form.getBoundingClientRect().height)).toBe(
+    formHeight,
+  );
 
   const toggle = page.getByRole("button", { name: "View notes for the notebook review from 2026-11-05" });
   await expect(toggle).toBeVisible();
-  const actions = [toggle, page.getByRole("button", { name: "Edit notebook review from 2026-11-05" }), page.getByRole("button", { name: "Delete notebook review from 2026-11-05" })];
-  const topOffsets = await Promise.all(actions.map(async button => (await button.boundingBox()).y));
+  const actions = [
+    toggle,
+    page.getByRole("button", { name: "Edit notebook review from 2026-11-05" }),
+    page.getByRole("button", { name: "Delete notebook review from 2026-11-05" }),
+  ];
+  const topOffsets = await Promise.all(actions.map(async (button) => (await button.boundingBox()).y));
   expect(Math.max(...topOffsets) - Math.min(...topOffsets)).toBeLessThan(2);
   await toggle.click();
-  await expect(page.locator("#rubric-history-rows .review-notes")).toContainText("Clear page numbers and a working contents page.");
-  await expect(page.locator("#rubric-history-rows .review-notes")).toContainText("Information is easy to reference");
+  await expect(page.locator("#rubric-history-rows .review-notes")).toContainText(
+    "Clear page numbers and a working contents page.",
+  );
+  await expect(page.locator("#rubric-history-rows .review-notes")).toContainText(
+    "Information is easy to reference",
+  );
 });
 
-test("interview reviews build a history; the current score uses each criterion's latest review", async ({ page }) => {
+test("interview reviews build a history; the current score uses each criterion's latest review", async ({
+  page,
+}) => {
   const errors = await openApp(page);
   await addTeams(page, [["1A", "One"]]);
   await page.click('[data-tab="rubric"]');
@@ -184,7 +227,9 @@ test("interview reviews build a history; the current score uses each criterion's
   await expect(scores).toHaveCount(6);
   const chooseScore = async (index, value) => {
     const id = await scores.nth(index).getAttribute("id");
-    await page.locator(`.rubric-guidance-option[data-guidance-for="${id}"][data-guidance-score="${value}"]`).click();
+    await page
+      .locator(`.rubric-guidance-option[data-guidance-for="${id}"][data-guidance-score="${value}"]`)
+      .click();
   };
 
   await page.fill("#interview-date", "2026-10-29");

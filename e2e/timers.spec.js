@@ -2,26 +2,48 @@
 const { test, expect } = require("@playwright/test");
 const { openApp, addTeams, schedule, useFakeTimerClock } = require("./helpers.js");
 
-const teams = [["1A", "One"], ["2A", "Two"], ["3A", "Three"], ["4A", "Four"]];
+const teams = [
+  ["1A", "One"],
+  ["2A", "Two"],
+  ["3A", "Three"],
+  ["4A", "Four"],
+];
 
-test.beforeEach(async ({ page }) => { await useFakeTimerClock(page); });
+test.beforeEach(async ({ page }) => {
+  await useFakeTimerClock(page);
+});
 
 test("screen wake lock follows fullscreen, timers, and page visibility", async ({ page }) => {
   await page.addInitScript(() => {
     let hidden = false;
     Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
     Object.defineProperty(Element.prototype, "requestFullscreen", { configurable: true, value: undefined });
-    window.__wake = { requests: 0, releases: 0, active: 0, setHidden(value) { hidden = value; document.dispatchEvent(new Event("visibilitychange")); } };
-    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: {
-      request: async type => {
-        if (type !== "screen") throw new Error("Unexpected wake lock type");
-        window.__wake.requests++;
-        window.__wake.active++;
-        const lock = new EventTarget();
-        lock.release = async () => { window.__wake.releases++; window.__wake.active--; lock.dispatchEvent(new Event("release")); };
-        return lock;
-      }
-    } });
+    window.__wake = {
+      requests: 0,
+      releases: 0,
+      active: 0,
+      setHidden(value) {
+        hidden = value;
+        document.dispatchEvent(new Event("visibilitychange"));
+      },
+    };
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: {
+        request: async (type) => {
+          if (type !== "screen") throw new Error("Unexpected wake lock type");
+          window.__wake.requests++;
+          window.__wake.active++;
+          const lock = new EventTarget();
+          lock.release = async () => {
+            window.__wake.releases++;
+            window.__wake.active--;
+            lock.dispatchEvent(new Event("release"));
+          };
+          return lock;
+        },
+      },
+    });
   });
   const errors = await openApp(page);
   await schedule(page, teams, 1);
@@ -65,13 +87,24 @@ test("screen wake lock follows fullscreen, timers, and page visibility", async (
 test("wake lock denial and delayed acquisition do not disrupt timers", async ({ page }) => {
   await page.addInitScript(() => {
     window.__wake = { requests: 0, releases: 0, resolve: null };
-    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: {
-      request: () => {
-        window.__wake.requests++;
-        if (window.__wake.requests === 1) return Promise.reject(new Error("Wake lock denied"));
-        return new Promise(resolve => { window.__wake.resolve = () => resolve({ release: async () => { window.__wake.releases++; }, addEventListener() {} }); });
-      }
-    } });
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: {
+        request: () => {
+          window.__wake.requests++;
+          if (window.__wake.requests === 1) return Promise.reject(new Error("Wake lock denied"));
+          return new Promise((resolve) => {
+            window.__wake.resolve = () =>
+              resolve({
+                release: async () => {
+                  window.__wake.releases++;
+                },
+                addEventListener() {},
+              });
+          });
+        },
+      },
+    });
   });
   const errors = await openApp(page);
   await schedule(page, teams, 1);
@@ -89,10 +122,20 @@ test("wake lock denial and delayed acquisition do not disrupt timers", async ({ 
   expect(errors).toEqual([]);
 });
 
-test("match timer counts down through the start countdown, driver switch window, pause, and end", async ({ page }) => {
+test("match timer counts down through the start countdown, driver switch window, pause, and end", async ({
+  page,
+}) => {
   const errors = await openApp(page);
   await schedule(page, teams, 1);
-  expect(Number(await page.locator("#timer-dial").evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle"))))).toBe(0);
+  expect(
+    Number(
+      await page
+        .locator("#timer-dial")
+        .evaluate((element) =>
+          parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle")),
+        ),
+    ),
+  ).toBe(0);
   // Reset is only available once a stopped timer has moved off the full minute.
   await expect(page.locator("#reset-timer")).toBeDisabled();
   await page.click("#start-timer");
@@ -110,11 +153,23 @@ test("match timer counts down through the start countdown, driver switch window,
   await expect(page.locator("#timer-label")).toHaveText("MATCH IN PROGRESS");
   await expect(page.locator("#timer")).toHaveText(/^0:\d{2}$/);
   await expect(page.locator("#reset-timer")).toBeDisabled();
-  const runStartAngle = Number(await page.locator("#timer-dial").evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle"))));
+  const runStartAngle = Number(
+    await page
+      .locator("#timer-dial")
+      .evaluate((element) =>
+        parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle")),
+      ),
+  );
 
   // Resetting a paused run needs no confirmation.
   await page.clock.fastForward(1000);
-  const activeAngle = Number(await page.locator("#timer-dial").evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle"))));
+  const activeAngle = Number(
+    await page
+      .locator("#timer-dial")
+      .evaluate((element) =>
+        parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle")),
+      ),
+  );
   expect(activeAngle).toBeGreaterThan(runStartAngle);
   await page.click("#start-timer");
   await expect(page.locator("#timer-label")).toHaveText("MATCH PAUSED");
@@ -139,7 +194,15 @@ test("match timer counts down through the start countdown, driver switch window,
   await expect(page.locator("#timer-label")).toHaveText("MATCH IN PROGRESS");
   await page.clock.fastForward(25000);
   await expect(page.locator("#timer-label")).toHaveText("MATCH COMPLETE");
-  expect(Number(await page.locator("#timer-dial").evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle"))))).toBe(360);
+  expect(
+    Number(
+      await page
+        .locator("#timer-dial")
+        .evaluate((element) =>
+          parseFloat(getComputedStyle(element).getPropertyValue("--timer-progress-angle")),
+        ),
+    ),
+  ).toBe(360);
   await expect(page.locator("#start-timer")).toBeDisabled();
 
   await page.click("#reset-timer");
@@ -182,14 +245,27 @@ test("sound icon toggles across timer rings and persists on this device", async 
   await expect(matchSound.locator(".sound-icon-on")).toBeVisible();
   await matchSound.click();
   await expect(matchSound).toHaveAttribute("aria-pressed", "false");
-  expect(await page.evaluate(() => ({ enabled: document.querySelector("#sound").checked, pressed: document.querySelector("#timer-dial .timer-sound-toggle").getAttribute("aria-pressed"), onHidden: document.querySelector("#timer-dial .sound-icon-on").hasAttribute("hidden"), offHidden: document.querySelector("#timer-dial .sound-icon-off").hasAttribute("hidden") }))).toEqual({ enabled: false, pressed: "false", onHidden: true, offHidden: false });
+  expect(
+    await page.evaluate(() => ({
+      enabled: document.querySelector("#sound").checked,
+      pressed: document.querySelector("#timer-dial .timer-sound-toggle").getAttribute("aria-pressed"),
+      onHidden: document.querySelector("#timer-dial .sound-icon-on").hasAttribute("hidden"),
+      offHidden: document.querySelector("#timer-dial .sound-icon-off").hasAttribute("hidden"),
+    })),
+  ).toEqual({ enabled: false, pressed: "false", onHidden: true, offHidden: false });
   await expect(matchSound.locator(".sound-icon-off")).toBeVisible();
   await expect(page.locator("#sound")).not.toBeChecked();
 
   await page.click('[data-tab="skills"]');
-  await expect(page.locator("#skills-timer-dial .timer-sound-toggle")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#skills-timer-dial .timer-sound-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
   await page.click('[data-tab="practice"]');
-  await expect(page.locator("#practice-timer-dial .timer-sound-toggle")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#practice-timer-dial .timer-sound-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
   await page.click("#open-settings");
   await expect(page.locator("#sound")).toBeHidden();
   await expect(page.locator("#timer-countdown")).toBeVisible();
@@ -201,7 +277,9 @@ test("sound icon toggles across timer rings and persists on this device", async 
   await expect(page.locator("#timer-dial .timer-sound-toggle")).toHaveAttribute("aria-pressed", "false");
 });
 
-test("full-screen flow runs, scores, and posts each match, then exits after the last one", async ({ page }) => {
+test("full-screen flow runs, scores, and posts each match, then exits after the last one", async ({
+  page,
+}) => {
   await openApp(page);
   await schedule(page, teams, 1);
   const flow = page.locator(".field-control");
@@ -231,13 +309,21 @@ test("full-screen flow runs, scores, and posts each match, then exits after the 
   await page.click("#flow-next");
 
   await expect(flow).not.toHaveClass(/flow-mode/);
-  expect(await page.evaluate(() => state.matches.map(match => Boolean(match.result)))).toEqual([true, true]);
+  expect(await page.evaluate(() => state.matches.map((match) => Boolean(match.result)))).toEqual([
+    true,
+    true,
+  ]);
   expect(await page.evaluate(() => History.resolve(state.history).length)).toBe(2);
 });
 
-test("practice draft state follows current values and clears after canceling a timer start", async ({ page }) => {
+test("practice draft state follows current values and clears after canceling a timer start", async ({
+  page,
+}) => {
   await openApp(page);
-  await addTeams(page, [["1A", "One"], ["2A", "Two"]]);
+  await addTeams(page, [
+    ["1A", "One"],
+    ["2A", "Two"],
+  ]);
   await page.click('[data-tab="practice"]');
   expect(await page.evaluate(() => PracticeUI.isDirty())).toBe(false);
 
@@ -255,7 +341,10 @@ test("practice draft state follows current values and clears after canceling a t
 
 test("practice timer controls pause, resume, stop with sound, and reset", async ({ page }) => {
   await openApp(page);
-  await addTeams(page, [["1A", "One"], ["2A", "Two"]]);
+  await addTeams(page, [
+    ["1A", "One"],
+    ["2A", "Two"],
+  ]);
   await page.click('[data-tab="practice"]');
 
   await page.click("#start-practice");
@@ -285,14 +374,21 @@ test("practice timer controls pause, resume, stop with sound, and reset", async 
   await expect(page.locator("#start-practice")).toBeVisible();
 });
 
-test("full-screen practice shows the timer and scoring on one page and posts each run before the next", async ({ page }) => {
+test("full-screen practice shows the timer and scoring on one page and posts each run before the next", async ({
+  page,
+}) => {
   const errors = await openApp(page);
-  await addTeams(page, [["1A", "One"], ["2A", "Two"]]);
+  await addTeams(page, [
+    ["1A", "One"],
+    ["2A", "Two"],
+  ]);
   await page.click('[data-tab="practice"]');
   const form = page.locator("#practice-form");
   await page.click("#practice-fullscreen");
   await expect(form).toHaveClass(/flow-mode/);
-  await expect(page.locator("#practice-flow-label")).toHaveText("Practice run \u00b7 Driver skills \u00b7 1A");
+  await expect(page.locator("#practice-flow-label")).toHaveText(
+    "Practice run \u00b7 Driver skills \u00b7 1A",
+  );
   await expect(page.locator("#practice-timer")).toBeInViewport();
   await expect(page.locator("#practice-scoring-inputs")).toBeVisible();
   await expect(page.locator("#practice-flow-next")).toHaveText("Next run \u2192");
@@ -308,9 +404,19 @@ test("full-screen practice shows the timer and scoring on one page and posts eac
   await expect(page.locator("#practice-timer-label")).toHaveText("READY FOR PRACTICE");
   await expect(page.locator("#practice-score-total")).toHaveText("0");
   await expect(form).toHaveClass(/flow-mode/);
-  expect(await page.evaluate(() => History.resolve(state.history).filter(record => record.source === "practice").length)).toBe(1);
+  expect(
+    await page.evaluate(
+      () => History.resolve(state.history).filter((record) => record.source === "practice").length,
+    ),
+  ).toBe(1);
   await expect(page.locator("#practice-date")).toHaveCount(0);
-  expect(await page.evaluate(() => Number.isFinite(Date.parse(History.resolve(state.history).find(record => record.source === "practice").occurredAt)))).toBe(true);
+  expect(
+    await page.evaluate(() =>
+      Number.isFinite(
+        Date.parse(History.resolve(state.history).find((record) => record.source === "practice").occurredAt),
+      ),
+    ),
+  ).toBe(true);
 
   await expect(page.locator("#start-practice")).toBeEnabled();
   await page.click("#start-practice");
@@ -347,7 +453,7 @@ test("full-screen flow can be left with the exit button and Escape without posti
   await page.evaluate(() => document.fullscreenElement && document.exitFullscreen());
   await page.keyboard.press("Escape");
   await expect(flow).not.toHaveClass(/flow-mode/);
-  expect(await page.evaluate(() => state.matches.some(match => match.result))).toBe(false);
+  expect(await page.evaluate(() => state.matches.some((match) => match.result))).toBe(false);
 });
 
 async function openSkills(page) {
@@ -364,7 +470,7 @@ test("Skills timer opens full screen with scoring and exits cleanly", async ({ p
     stopTop: document.querySelector("#skills-stop-time").closest("label").getBoundingClientRect().top,
     attemptsBottom: document.querySelector("#skills-attempt-log").getBoundingClientRect().bottom,
     timerBottom: document.querySelector("#skills-timer-stage").getBoundingClientRect().bottom,
-    scoreTop: document.querySelector("#skills-score-total").getBoundingClientRect().top
+    scoreTop: document.querySelector("#skills-score-total").getBoundingClientRect().top,
   }));
   expect(normalLayout.stopTop).toBeGreaterThan(normalLayout.attemptsBottom);
   expect(normalLayout.scoreTop).toBeGreaterThan(normalLayout.timerBottom);
@@ -379,11 +485,13 @@ test("Skills timer opens full screen with scoring and exits cleanly", async ({ p
   await expect(page.locator(".skills-settings")).toBeHidden();
   await expect(page.locator(".skills-live-standings")).toBeHidden();
   const fullscreenLayout = await page.evaluate(() => ({
-    modes: Array.from(document.querySelectorAll("#skills-attempt-log .skills-log-mode"), element => element.getBoundingClientRect()),
+    modes: Array.from(document.querySelectorAll("#skills-attempt-log .skills-log-mode"), (element) =>
+      element.getBoundingClientRect(),
+    ),
     stop: document.querySelector("#skills-stop-time").closest("label").getBoundingClientRect(),
     timerLeft: document.querySelector("#skills-timer-stage").getBoundingClientRect().left,
     timerTop: document.querySelector("#skills-timer-stage").getBoundingClientRect().top,
-    scoreLeft: document.querySelector("#skills-score-total").getBoundingClientRect().left
+    scoreLeft: document.querySelector("#skills-score-total").getBoundingClientRect().left,
   }));
   expect(fullscreenLayout.modes[1].top).toBeGreaterThan(fullscreenLayout.modes[0].bottom);
   expect(fullscreenLayout.stop.top).toBeGreaterThan(fullscreenLayout.modes[1].bottom);
@@ -400,7 +508,7 @@ test("Skills timer opens full screen with scoring and exits cleanly", async ({ p
   const mobileLayout = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     timerBottom: document.querySelector("#skills-timer-stage").getBoundingClientRect().bottom,
-    scoreTop: document.querySelector("#skills-score-total").getBoundingClientRect().top
+    scoreTop: document.querySelector("#skills-score-total").getBoundingClientRect().top,
   }));
   expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(390);
   expect(mobileLayout.scoreTop).toBeGreaterThan(mobileLayout.timerBottom);
@@ -435,9 +543,19 @@ test("ending a driver skills run early records the stop time with the posted att
   await page.locator('#skills-scoring-inputs [data-step="1"]').first().click();
   await expect(page.locator("#save-skills")).toBeEnabled();
   await page.click("#save-skills");
-  await expect(page.locator('[data-open-skills-mode="driver"][data-open-skills-attempt="1"]')).not.toContainText("--");
-  expect(await page.evaluate(() => state.skills.map(({ team, mode, attempt, stopTime }) => ({ team, mode, attempt, stopTime })))).toEqual([{ team: "1A", mode: "driver", attempt: 1, stopTime: 29 }]);
-  expect(await page.evaluate(() => History.resolve(state.history).filter(record => record.kind === "skills").length)).toBe(1);
+  await expect(
+    page.locator('[data-open-skills-mode="driver"][data-open-skills-attempt="1"]'),
+  ).not.toContainText("--");
+  expect(
+    await page.evaluate(() =>
+      state.skills.map(({ team, mode, attempt, stopTime }) => ({ team, mode, attempt, stopTime })),
+    ),
+  ).toEqual([{ team: "1A", mode: "driver", attempt: 1, stopTime: 29 }]);
+  expect(
+    await page.evaluate(
+      () => History.resolve(state.history).filter((record) => record.kind === "skills").length,
+    ),
+  ).toBe(1);
   expect(errors).toEqual([]);
 });
 
