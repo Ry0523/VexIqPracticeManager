@@ -78,6 +78,18 @@ test("V5 practice bundle exposes only practice and reviews with mode-specific sc
   await page.click('[data-tab="practice"]');
   await expect(page.locator("#start-practice")).toBeEnabled();
   await expect(page.locator("#save-practice")).toBeDisabled();
+  const practiceCount = page.locator("#practice-scoring-inputs [data-v5-path]").first();
+  await expect(practiceCount).toHaveAttribute("readonly", "");
+  await expect(practiceCount).toHaveAttribute("tabindex", "-1");
+  await expect(practiceCount).toHaveAttribute("inputmode", "none");
+  expect(
+    await practiceCount.evaluate((element) => ({
+      pointerEvents: getComputedStyle(element).pointerEvents,
+      userSelect: getComputedStyle(element).userSelect,
+    })),
+  ).toEqual({ pointerEvents: "none", userSelect: "none" });
+  await practiceCount.locator("xpath=following-sibling::button").click();
+  await expect(practiceCount).toHaveValue("1");
   await page.click("#start-practice");
   await expect(page.locator("#practice-timer-label")).toHaveText("PRACTICE IN PROGRESS");
   await page.click("#stop-practice");

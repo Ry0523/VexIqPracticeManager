@@ -282,3 +282,67 @@ test("interview reviews build a history; the current score uses each criterion's
   expect(await page.evaluate(() => state.interviews.length)).toBe(1);
   expect(errors).toEqual([]);
 });
+
+test("prints only the selected notebook or interview review summary", async ({ page }) => {
+  await openApp(page);
+  await addTeams(page, [["1A", "One"]]);
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.__printTitles = [];
+    window.print = () => {
+      window.__printCalls++;
+      window.__printTitles.push(document.title);
+    };
+  });
+  const originalTitle = await page.title();
+
+  await page.click('[data-tab="rubric"]');
+  await page.fill("#rubric-date", "2026-11-05");
+  await page.fill("#rubric-reviewer", "Coach A");
+  await page.fill("#rubric-overall", "Notebook summary A");
+  await page.locator('#rubric-guidance-navigation [data-guidance-score="3"]').click();
+  await page.locator("#rubric-note-navigation").fill("Notebook evidence A");
+  await page.click("#save-rubric");
+
+  await page.fill("#rubric-date", "2026-11-06");
+  await page.fill("#rubric-reviewer", "Coach B");
+  await page.locator('#rubric-guidance-navigation [data-guidance-score="2"]').click();
+  await page.locator("#rubric-note-navigation").fill("Notebook evidence B");
+  await page.click("#save-rubric");
+  await page.getByRole("button", { name: "Print notebook review from 2026-11-05" }).click();
+
+  const printSheet = page.locator("#review-print-sheet");
+  await expect(printSheet).toContainText("Notebook review summary");
+  await expect(printSheet).toContainText("Notebook summary A");
+  await expect(printSheet).toContainText("Notebook evidence A");
+  await expect(printSheet).not.toContainText("Coach B");
+  await expect(printSheet).not.toContainText("Notebook evidence B");
+  expect(await page.evaluate(() => window.__printCalls)).toBe(1);
+  expect(await page.title()).toBe("notebook-1a-2026-11-05-review");
+  expect(await page.evaluate(() => window.__printTitles)).toEqual(["notebook-1a-2026-11-05-review"]);
+  await page.emulateMedia({ media: "print" });
+  await expect(printSheet).toBeVisible();
+  await expect(page.locator("#print-sheet")).toBeHidden();
+  expect(
+    await printSheet
+      .locator(".review-sections")
+      .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+  ).toBe(2);
+  await page.emulateMedia({ media: "screen" });
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await expect(page).toHaveTitle(originalTitle);
+
+  await page.click('[data-tab="interview"]');
+  await page.fill("#interview-date", "2026-11-07");
+  await page.fill("#interview-reviewer", "Interviewer");
+  await page.locator('#interview-guidance-own-work [data-guidance-score="2"]').click();
+  await page.locator("#interview-note-own-work").fill("Interview evidence");
+  await page.click("#save-interview");
+  await page.getByRole("button", { name: "Print interview review from 2026-11-07" }).click();
+  await expect(printSheet).toContainText("Interview review summary");
+  await expect(printSheet).toContainText("Interview evidence");
+  expect(await page.evaluate(() => window.__printCalls)).toBe(2);
+  expect(await page.title()).toBe("interview-1a-2026-11-07-review");
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await expect(printSheet).toBeEmpty();
+});

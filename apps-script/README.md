@@ -51,7 +51,7 @@ show both. A save is refused only when someone else changed the same item first 
 > visitor's email address when the visitor is in the same Workspace domain as the account running the script.
 > If a personal Gmail account deploys it, every visitor (including staff) is read-only.
 
-## Set up
+## IQ setup
 
 1. Export a JSON backup from the existing local app before switching. Local IndexedDB data is not
    automatically transferred to the hosted URL.
@@ -63,10 +63,10 @@ show both. A save is refused only when someone else changed the same item first 
    the project in Drive as appropriate for maintenance. End users need neither the spreadsheet nor the script
    source; the web app link is enough. Use one script project for the spreadsheet: locks are scoped to that
    project.
-4. From the parent workspace, run:
+4. From the `VexIqPracticeManager` project directory, run:
 
    ```powershell
-   node .\local-match-manager\build-apps-script.js level-up
+  npm run build:iq
    ```
 
 5. In the Apps Script editor, paste the generated `dist-iq/Code.gs` and `dist-iq/Models.gs` into script files
@@ -99,22 +99,25 @@ the project files, and deploy a new version of the same deployment.
 ## Updating from VS Code with clasp
 
 After the first setup, push changes from VS Code with [clasp](https://github.com/google/clasp) instead of
-pasting files. `local-match-manager\.clasp-iq.json` links this folder to the IQ Apps Script project, and its
-`rootDir` is `apps-script/dist-iq`. Only the generated files are uploaded.
+pasting files. Run commands from the `VexIqPracticeManager` project directory. This repository has separate
+clasp configs for its Apps Script projects and no default `.clasp.json`: use `.clasp-iq.json` for IQ and
+`.clasp-v5.json` for V5. Pass the matching config with `--project` on every project command, including
+`deployments` and `deploy`, or clasp reports that project settings cannot be found. The IQ config's `rootDir`
+is `apps-script/dist-iq`; only generated files are uploaded.
 
 One-time setup (in a VS Code terminal):
 
 1. In https://script.google.com/home/usersettings, turn on **Google Apps Script API**.
 2. Run `npx @google/clasp login` and sign in with the Google account that owns the script project.
 
-For each update, open a terminal in VS Code (**Terminal > New Terminal**) and run:
+For each IQ update, open a terminal in VS Code (**Terminal > New Terminal**), set its current directory to the
+`VexIqPracticeManager` project directory, and run:
 
 ```powershell
-cd ".\local-match-manager"
 npm run build:iq
 npx clasp --project .\.clasp-iq.json push
-npx clasp deployments
-npx clasp deploy -i <deploymentId> -d "Short description of change"
+npx clasp --project .\.clasp-iq.json deployments
+npx clasp --project .\.clasp-iq.json deploy -i <deploymentId> -d "Short description of change"
 ```
 
 - `build-apps-script.js level-up` regenerates `apps-script/dist-iq`. Always build before pushing; never edit
@@ -122,10 +125,11 @@ npx clasp deploy -i <deploymentId> -d "Short description of change"
 - `clasp push` replaces the project's code with `dist-iq`, including `appsscript.json`. If it asks to
   overwrite the manifest, answer yes. Pushing updates only the editor's code and the `/dev` test URL, not the
   shared `/exec` URL.
-- `clasp deployments` lists deployments. Copy the ID of the existing web app deployment (not the `@HEAD`
-  entry).
-- `clasp deploy -i <deploymentId>` publishes a new version to that same deployment, so the shared `/exec` URL
-  stays the same. Running `clasp deploy` without `-i` creates a new deployment with a different URL.
+- `clasp --project .\\.clasp-iq.json deployments` lists IQ deployments. Copy the ID of the existing web app
+  deployment (not the `@HEAD` entry).
+- `clasp --project .\\.clasp-iq.json deploy -i <deploymentId>` publishes a new version to that same deployment,
+  so the shared `/exec` URL stays the same. Running `deploy` without `-i` creates a new deployment with a
+  different URL.
 
 You can instead push with clasp and publish in the browser: **Deploy > Manage deployments**, edit the existing
 web app deployment, choose **Version: New version**, and **Deploy**. Users may need to refresh the page to
@@ -133,10 +137,16 @@ load the new version. Script properties (`SPREADSHEET_ID`, `FAVICON_URL`) are no
 
 ### Separate VEX V5 deployment
 
-Build the practice-only V5 target from the `local-match-manager` directory with `npm run build:v5`. It writes
-`apps-script/dist-v5` and does not replace the IQ `apps-script/dist-iq` output. Create a separate Apps Script
-project and spreadsheet for V5, then paste `Code.gs`, `Models.gs`, `Index.html`, and `appsscript.json` from
-`dist-v5` into that project. Configure its own `SPREADSHEET_ID` and deploy it under the intended V5 owner.
+Build the practice-only V5 target from the `VexIqPracticeManager` project directory with `npm run build:v5`. It
+writes `apps-script/dist-v5` and does not replace the IQ `apps-script/dist-iq` output. Use a separate Apps Script
+project and spreadsheet for V5. For manual setup, paste the generated `dist-v5/Code.gs`, `Models.gs`, and
+`Index.html` into the V5 project and set its manifest from `dist-v5/appsscript.json`. The `.clasp-v5.json`
+config must contain that V5 project's script ID and have `rootDir` set to `apps-script/dist-v5`; do not reuse
+the IQ script ID or spreadsheet. Configure the V5 project's own `SPREADSHEET_ID` and deploy it under the
+intended V5 owner. If creating a new V5 script project, update the `scriptId` in `.clasp-v5.json` before using
+clasp. As with IQ, always pass the matching config to each project command; this repo has no default
+`.clasp.json`.
+
 Every account listed in **Settings > Manage access** has the same editing and access-management permissions;
 accounts not on the list are read-only. Teamwork practice records both Alliances and all four teams; its clock
 is 2:00 with a 15-second Autonomous Period. Driver and Autonomous Skills runs are solo, one-minute runs.
@@ -147,7 +157,12 @@ Analysis refreshes official World Skills standings for the configured Ohio Middl
 ```powershell
 npm run build:v5
 npx clasp --project .\.clasp-v5.json push
+npx clasp --project .\.clasp-v5.json deployments
+npx clasp --project .\.clasp-v5.json deploy -i <deploymentId> -d "Short description of change"
 ```
+
+For V5, use the existing V5 web app deployment ID (not `@HEAD`) with `deploy -i` to keep its `/exec` URL.
+The IQ deployment ID belongs to a different Apps Script project and cannot be used with `.clasp-v5.json`.
 
 ### Switching to a new season's game
 

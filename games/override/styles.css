@@ -700,6 +700,10 @@
   font-size: 16px;
   font-weight: 700;
   cursor: default;
+  caret-color: transparent;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .v5-stepper input[readonly]::-webkit-inner-spin-button,
 .v5-stepper input[readonly]::-webkit-outer-spin-button {

@@ -127,7 +127,7 @@ All match, skills, and practice timers use audio excerpts from the user-supplied
 with the user's confirmation of reuse rights. These are not independently authenticated official assets and do
 not imply endorsement. The generated `timer-sounds.js` bundles the seven `timer-*.wav` files for both local
 and hosted playback without external audio requests; regenerate it with
-`node .\local-match-manager\build-apps-script.js level-up` if recordings change. Keep it with the local app.
+`npm run build:iq` if recordings change. Keep it with the local app.
 Clips are decoded into Web Audio buffers, leading silence is trimmed, clip edges get a 2 ms de-click ramp, the
 final countdown beat and the full start sound play as one seamless clip (just as in the recording), and cues
 are scheduled ahead rather than triggered by display polling. After audio becomes ready, the display is
@@ -654,21 +654,16 @@ isolated.
 
 ## Tests
 
-With Node.js installed, run from the parent workspace:
-
-```powershell
-node --test .\local-match-manager\core.test.js .\local-match-manager\history.test.js .\local-match-manager\practice.test.js .\local-match-manager\rubric.test.js .\local-match-manager\shared.test.js .\local-match-manager\timer-audio.test.js .\local-match-manager\finals.test.js .\local-match-manager\game.test.js
-```
-
-Or, from the `local-match-manager` folder, run `npm test` for the same unit tests.
+With Node.js installed, run these commands from the `VexIqPracticeManager` project directory. Install the
+dependencies once with `npm install`, then run `npm test` for the unit/model suites.
 
 Browser tests drive the real app in Microsoft Edge: posting and reloading scores, two-tab save protection,
 unsaved-draft warnings, Back-button navigation, text escaping, rubric accessibility, interview review history
 (follow-up review, edit and delete), shared-app roles (viewer, team member, and the coach access list), the
 match timer (countdown, driver-switch window, pause, reset), the full-screen match flow, and driver/autonomous
 skills runs including early stop times. Each test starts with an empty browser database; timer tests disable
-audio and use a simulated clock, so a 60-second run takes moments. From the `local-match-manager` folder, run
-`npm install` once, then:
+audio and use a simulated clock, so a 60-second run takes moments. Run the browser suite from the project
+directory:
 
 ```powershell
 npm run test:browser

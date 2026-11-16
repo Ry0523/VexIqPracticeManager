@@ -492,6 +492,31 @@
       return `<div class="review-notes" id="${prefix}-notes-${escapeText(entry.id)}">${overall ? `<div class="review-overall"><h4>Overall notes</h4><p>${escapeText(overall)}</p></div>` : ""}<div class="review-sections">${groups}</div></div>`;
     }
 
+    function printReview(entry) {
+      const target = document.getElementById("review-print-sheet");
+      const points = Rubric.summary(entry);
+      const previousTitle = document.title;
+      const printTitle = `${title}-${entry.team.id}-${entry.evaluatedOn}-review`
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      target.innerHTML = `<article><h1>${escapeText(title)} review summary</h1><p class="review-print-meta"><span><strong>Team</strong> ${escapeText(entry.team.id)} / ${escapeText(entry.team.name)}</span><span><strong>Date</strong> ${escapeText(entry.evaluatedOn)}</span><span><strong>Reviewer</strong> ${escapeText(entry.reviewer || "Not recorded")}</span><span><strong>Type</strong> ${entry.reviewRole === "member" ? "Student review" : "Coach review"}</span></p><p class="review-print-total"><strong>Score:</strong> ${points.total} / ${points.maximum} <span>(${points.scored} / ${count} criteria scored)</span></p>${details(entry)}</article>`;
+      target.setAttribute("aria-hidden", "false");
+      document.body.classList.add("printing-review");
+      document.title = printTitle;
+      window.addEventListener(
+        "afterprint",
+        () => {
+          target.replaceChildren();
+          target.setAttribute("aria-hidden", "true");
+          document.body.classList.remove("printing-review");
+          document.title = previousTitle;
+        },
+        { once: true },
+      );
+      window.print();
+    }
+
     /**
      * Renders readable review history and permitted actions for the selected team.
      *
@@ -519,9 +544,13 @@
               canExpandNotes && open
                 ? `<tr class="review-notes-row"><td colspan="5">${details(entry)}</td></tr>`
                 : "";
-            const actions = canManage(entry)
+            const print = canExpandNotes
+              ? `<button type="button" data-review-print="${escapeText(entry.id)}" aria-label="Print ${label} review from ${when}">Print</button>`
+              : "";
+            const manage = canManage(entry)
               ? `<button type="button" data-review-edit="${escapeText(entry.id)}" aria-label="Edit ${label} review from ${when}"${disabled}>Edit</button><button type="button" data-review-delete="${escapeText(entry.id)}" aria-label="Delete ${label} review from ${when}"${disabled}>Delete</button>`
               : "";
+            const actions = `${print}${manage}`;
             return `<tr class="${open ? "notes-open" : ""}"><td>${when}${entry.id === editing ? " (editing)" : ""}</td><td>${escapeText(entry.reviewer)}<small>${entry.reviewRole === "member" ? "Student review (not ranked)" : "Coach review"}</small></td><td>${points.total}</td><td>${points.scored} / ${count}</td><td><div class="review-row-actions">${canExpandNotes ? toggle : ""}${actions}</div></td></tr>${panel}`;
           })
           .join("") ||
@@ -691,6 +720,14 @@
         get("rubric-history-rows")
           .querySelector(`[data-review-notes="${CSS.escape(id)}"]`)
           ?.focus();
+        return;
+      }
+      const printButton = event.target.closest("[data-review-print]");
+      if (printButton) {
+        const entry = entries().find(
+          (item) => item.id === printButton.dataset.reviewPrint && canRead(item),
+        );
+        if (entry) printReview(entry);
         return;
       }
       const editButton = event.target.closest("[data-review-edit]");

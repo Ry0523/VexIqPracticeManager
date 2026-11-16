@@ -44,7 +44,7 @@ test("schedule print uses readable point-sized type", async ({ page }) => {
   await scheduleAndPostFirstMatch(page);
   await page.evaluate(() => renderPrintSheet());
   await page.emulateMedia({ media: "print" });
-  const sizes = await page.locator(".print-sheet").evaluate((sheet) => ({
+  const sizes = await page.locator("#print-sheet").evaluate((sheet) => ({
     body: getComputedStyle(sheet).fontSize,
     heading: getComputedStyle(sheet.querySelector("th")).fontSize,
     page: [...document.styleSheets]
@@ -53,6 +53,27 @@ test("schedule print uses readable point-sized type", async ({ page }) => {
   }));
   expect(sizes).toMatchObject({ body: "16px", heading: "12px" });
   expect(sizes.page).toContain("size: letter");
+});
+
+test("Level Up score values are not selectable or editable", async ({ page }) => {
+  await openApp(page);
+  await addTeams(page, [
+    ["1A", "One"],
+    ["2A", "Two"],
+  ]);
+  await page.locator("#schedule-form button[type=submit]").click();
+  const input = page.locator("#scoring-inputs [data-goal-path]").first();
+  await expect(input).toHaveAttribute("readonly", "");
+  await expect(input).toHaveAttribute("tabindex", "-1");
+  await expect(input).toHaveAttribute("inputmode", "none");
+  expect(
+    await input.evaluate((element) => ({
+      pointerEvents: getComputedStyle(element).pointerEvents,
+      userSelect: getComputedStyle(element).userSelect,
+    })),
+  ).toEqual({ pointerEvents: "none", userSelect: "none" });
+  await page.locator(`[data-counter="${await input.getAttribute("id")}"][data-step="1"]`).click();
+  await expect(input).toHaveValue("1");
 });
 
 test("team analysis shows recent improvement and rolling trends without changing leaderboard scores", async ({

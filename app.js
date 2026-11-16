@@ -1318,6 +1318,7 @@ function renderFooter() {
   get("footer-history-count").textContent =
     `/ ${scores.toLocaleString()} ${scores === 1 ? "score" : "scores"} saved`;
 }
+globalThis.renderFooter = renderFooter;
 
 /**
  * Renders shared event state and delegates specialized views to their UI modules.
@@ -1646,8 +1647,8 @@ function goalCounter(input, scoringDraft = draft, prefix = "goal", mode = null) 
   const valueInput = [
     `<input id="${id}" aria-label="${counterLabel}"`,
     ` data-goal-path="${input.path.join(".")}" data-goal-points="${points}"`,
-    ` data-goal-max="${inputMax ?? ""}" type="number" inputmode="numeric"`,
-    ` min="0"${inputMax ? ` max="${inputMax}"` : ""} step="1" value="${count}" required>`,
+    ` data-goal-max="${inputMax ?? ""}" type="number" inputmode="none"`,
+    ` min="0"${inputMax ? ` max="${inputMax}"` : ""} step="1" value="${count}" required readonly tabindex="-1">`,
   ].join("");
   const increment = `<button type="button" data-step="1" data-counter="${id}" aria-label="Increase ${counterLabel}" title="Add one ${itemObject}">+</button>`;
   return [

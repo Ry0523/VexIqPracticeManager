@@ -1585,6 +1585,13 @@ input:disabled {
   appearance: textfield;
   -moz-appearance: textfield;
 }
+.goal-stepper input[readonly] {
+  caret-color: transparent;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
 .goal-stepper input::-webkit-inner-spin-button,
 .goal-stepper input::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -2903,9 +2910,12 @@ input:disabled {
 .print-sheet {
   display: none;
 }
+.review-print-sheet {
+  display: none;
+}
 @page {
   size: letter portrait;
-  margin: 12mm;
+  margin: 8mm;
 }
 @media print {
   :root {
@@ -2937,6 +2947,94 @@ input:disabled {
       Arial,
       sans-serif;
     color: #000;
+  }
+  .review-print-sheet h1 {
+    margin: 0 0 5px;
+    font-size: 15pt;
+  }
+  body.printing-review .review-print-sheet {
+    font: 9pt/1.15 "Segoe UI", Arial, sans-serif;
+  }
+  .review-print-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 0 0 5px;
+    font-size: 8pt;
+  }
+  .review-print-total {
+    margin: 0 0 5px;
+  }
+  .review-print-total span {
+    margin-left: 8px;
+    font-size: 8pt;
+  }
+  body.printing-review #print-sheet {
+    display: none !important;
+  }
+  body.printing-review #review-print-sheet {
+    display: block !important;
+  }
+  body.printing-review .review-notes {
+    gap: 5px;
+    position: static;
+    max-width: none;
+    padding: 0;
+  }
+  body.printing-review .review-notes h4 {
+    margin-bottom: 3px;
+    font-size: 7.5pt;
+  }
+  body.printing-review .review-overall {
+    padding: 5px 8px;
+  }
+  body.printing-review .review-overall p,
+  body.printing-review .review-notes li p {
+    margin-top: 2px;
+    font-size: 7.5pt;
+    line-height: 1.15;
+  }
+  body.printing-review .review-sections {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 5px 8px;
+  }
+  body.printing-review .review-sections section {
+    break-inside: avoid;
+    margin: 0;
+    padding: 5px 7px;
+    border-color: #999;
+    border-radius: 0;
+    background: white;
+  }
+  body.printing-review .review-sections section > h4 {
+    margin-bottom: 3px;
+    font-size: 7.5pt;
+  }
+  body.printing-review .review-sections li {
+    padding: 3px 0;
+  }
+  body.printing-review .review-criterion {
+    gap: 5px;
+    font-size: 8pt;
+  }
+  body.printing-review .review-overall {
+    border-color: #555;
+    background: white;
+  }
+  body.printing-review .review-score {
+    min-width: 2.4em;
+    padding: 1px 5px;
+    border: 1px solid #555;
+    border-radius: 2px;
+    background: white;
+    color: #000;
+    font-size: 7.5pt;
+  }
+  body.printing-review .review-score.unscored {
+    border-color: #777;
+    color: #444;
   }
   .print-sheet h2 {
     font-size: 16pt;

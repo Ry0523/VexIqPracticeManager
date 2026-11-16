@@ -95,7 +95,7 @@ let html = source("index.html")
   )
   .replace("LOCAL MATCH MANAGER", "SHARED MATCH MANAGER");
 const rulesFiles = ["scoring.js", "scheduling.js", "teams.js", "event-rules.js"];
-const scripts = [
+const scriptFiles = [
   ...clientGameFiles,
   ...rulesFiles,
   "finals.js",
@@ -112,9 +112,10 @@ const scripts = [
   "rubric-guidance.js",
   "rubric-ui.js",
   "access-ui.js",
-]
-  .map((name) => `<script>\n${sourceFor(name).replace(/<\/script/gi, "<\\/script")}\n</script>`)
-  .join("\n");
+];
+const scriptSource = scriptFiles.map(sourceFor).join("\n");
+const scriptSourceBase64 = Buffer.from(scriptSource, "utf8").toString("base64");
+const scripts = `<script>\n(() => {\n  const encoded = "${scriptSourceBase64}";\n  const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));\n  eval(new TextDecoder().decode(bytes));\n})();\n</script>`;
 html = html.replace("</body>", () => `${scripts}\n</body>`);
 fs.writeFileSync(path.join(output, "Index.html"), html);
 fs.writeFileSync(

@@ -24,7 +24,7 @@
       const id = `practice-field-${path.replaceAll(".", "-")}`;
       const minReached = Number(value) <= 0;
       const maxReached = max !== null && Number(value) >= max;
-      return `<div class="v5-count ${color}"><div class="v5-stepper"><button type="button" data-step="-1" data-counter="${id}" aria-label="Decrease ${escapeText(label)}" title="Remove one"${minReached ? " disabled" : ""}>&minus;</button><input id="${id}" type="number" inputmode="numeric" min="0"${max === null ? "" : ` max="${max}"`} data-v5-path="${path}" step="1" value="${value}" required readonly aria-label="${escapeText(label)}"><button type="button" data-step="1" data-counter="${id}" aria-label="Increase ${escapeText(label)}" title="Add one"${maxReached ? " disabled" : ""}>+</button></div></div>`;
+      return `<div class="v5-count ${color}"><div class="v5-stepper"><button type="button" data-step="-1" data-counter="${id}" aria-label="Decrease ${escapeText(label)}" title="Remove one"${minReached ? " disabled" : ""}>&minus;</button><input id="${id}" type="number" inputmode="none" min="0"${max === null ? "" : ` max="${max}"`} data-v5-path="${path}" step="1" value="${value}" required readonly tabindex="-1" aria-label="${escapeText(label)}"><button type="button" data-step="1" data-counter="${id}" aria-label="Increase ${escapeText(label)}" title="Add one"${maxReached ? " disabled" : ""}>+</button></div></div>`;
     }
 
     /**
